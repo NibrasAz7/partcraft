@@ -1,0 +1,33 @@
+{
+    "format": "cadcraft-devshell",
+    "version": 1,
+    "app": {
+        "slug": "partcraft",
+        "name": "PartCraft",
+        "layer": "cyan",
+        "role": "Parametric parts & assemblies",
+        "tagline": "Sketch, constrain, extrude. Then build the assembly.",
+        "short": "Constrained sketches, feature history, assemblies with joints and drawings with GD&T. STEP in and out."
+    },
+    "others": {
+        "cadcraft": "CadCraft",
+        "bimcraft": "BimCraft",
+        "modelcraft": "ModelCraft",
+        "markupcraft": "MarkupCraft",
+        "takeoffcraft": "TakeoffCraft",
+        "civilcraft": "CivilCraft",
+        "detailcraft": "DetailCraft"
+    },
+    "vendor": {
+        "h5wasm": "0.10.3",
+        "manifold-3d": "3.5.4",
+        "pyodide": "314.0.7",
+        "three": "0.186.1",
+        "wasmoon": "1.16.0"
+    },
+    "origin": "https://getcadcraft.com",
+    "packed": {
+        "at": "2026-10-13T20:37:44Z",
+        "build": "0.4"
+    }
+}
