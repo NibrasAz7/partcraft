@@ -43,6 +43,9 @@ const SC = await import(DEV + 'script.js');
 const S = await import(DEV + 'sketch.js');
 const { solveSketch } = await import(DEV + 'solver.js');
 const { literal, formatNumber } = await import(DEV + 'expr.js');
+// the workspaces' study readers (part.js refuses a file whose study data nobody reads): a part with scripts, a simulation, a
+// CAM setup … opens here as in the app (0.5 WL.30 found `run --part` refusing a part with scripts)
+await Promise.all(['ws-script.js', 'ws-simulation.js', 'ws-manufacture.js', 'ws-generative.js', 'ws-form.js'].map((m) => import(DEV + m)));
 
 class Usage extends Error {}
 const fmt = (v) => (typeof v === 'number' ? formatNumber(v) : String(v));
@@ -395,13 +398,15 @@ async function runScript(pos, opt) {
     return null;
   };
   let part = null;
+  const params = {};   // the part's parameters for param() / params() (0.5 WL.30)
   if (opt.part) {
     const L = readInput(opt.part);
     const { r } = await regen(L.part, opt);
     if (!r.mesh) throw new Error(`${opt.part}: the part has no solid to hand to the script.`);
     part = CS.IO.modelFromMesh(r.mesh, { source: 'part', ref: L.part.name });
+    if (L.part.params) for (const [k, v] of PR.evaluateVars(L.part.params).values) if (Number.isFinite(v)) params[k] = v;
   }
-  CS.IO.setIoHost(CS.IO.nodeFs(null, { part }));
+  CS.IO.setIoHost(CS.IO.nodeFs(null, { part, params }));
   const shown = new Map();
   let lastShown = null;
   const budget = opt.budget === undefined ? 2e9 : Number(opt.budget);

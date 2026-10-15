@@ -30,6 +30,7 @@ $__tools = [
         ['new', 'file-earmark-plus', Lang::t('ui.tb.file.new'), Lang::t('ui.tb.file.new.title')],
         ['open', 'folder2-open', Lang::t('ui.tb.file.open'), Lang::t('ui.tb.file.open.title')],
         ['save', 'download', Lang::t('ui.tb.file.save'), Lang::t('ui.tb.file.save.title')],
+        ['std-part', 'nut', Lang::t('ui.tb.file.std_part'), Lang::t('ui.tb.file.std_part.title')],
     ],
     'Sketch' => [   // i18n-ignore: the group's key (also its aria-label, which the shell's toolbar arrangement saves); the visible name is ui.tb.group.*
         ['sketch', 'pencil-square', Lang::t('ui.tb.sketch.sketch'), Lang::t('ui.tb.sketch.sketch.title')],
@@ -118,20 +119,20 @@ $__tools = [
               <div class="pc-menu-list" role="menu">
                 <?php foreach ([
                     ['revolve-cut', 'arrow-clockwise', Lang::t('ui.tb.fmore.revolve_cut'), Lang::t('ui.tb.fmore.revolve_cut.title')],
-                    null,
+                    'ui.tb.fmore.h.reference',
                     ['plane', 'square-half', Lang::t('ui.tb.fmore.plane'), Lang::t('ui.tb.fmore.plane.title')],
                     ['axis', 'arrows-vertical', Lang::t('ui.tb.fmore.axis'), Lang::t('ui.tb.fmore.axis.title')],
                     ['point', 'crosshair', Lang::t('ui.tb.fmore.point'), Lang::t('ui.tb.fmore.point.title')],
-                    null,
+                    'ui.tb.fmore.h.sweep',
                     ['sweep', 'bezier2', Lang::t('ui.tb.fmore.sweep'), Lang::t('ui.tb.fmore.sweep.title')],
                     ['loft', 'layers', Lang::t('ui.tb.fmore.loft'), Lang::t('ui.tb.fmore.loft.title')],
                     ['draft', 'triangle-half', Lang::t('ui.tb.fmore.draft'), Lang::t('ui.tb.fmore.draft.title')],
-                    null,
+                    'ui.tb.fmore.h.bodies',
                     ['combine', 'union', Lang::t('ui.tb.fmore.combine'), Lang::t('ui.tb.fmore.combine.title')],
                     ['movebody', 'arrows-move', Lang::t('ui.tb.fmore.movebody'), Lang::t('ui.tb.fmore.movebody.title')],
                     ['scalebody', 'aspect-ratio', Lang::t('ui.tb.fmore.scalebody'), Lang::t('ui.tb.fmore.scalebody.title')],
                     ['pathpattern', 'bezier', Lang::t('ui.tb.fmore.pathpattern'), Lang::t('ui.tb.fmore.pathpattern.title')],
-                    null,
+                    'ui.tb.fmore.h.surfaces',
                     ['patch', 'bandaid', Lang::t('ui.tb.fmore.patch'), Lang::t('ui.tb.fmore.patch.title')],
                     ['surfloft', 'layers-half', Lang::t('ui.tb.fmore.surfloft'), Lang::t('ui.tb.fmore.surfloft.title')],
                     ['gordon', 'grid-3x3', Lang::t('ui.tb.fmore.gordon'), Lang::t('ui.tb.fmore.gordon.title')],
@@ -141,12 +142,11 @@ $__tools = [
                     ['extendsurf', 'arrows-angle-expand', Lang::t('ui.tb.fmore.extendsurf'), Lang::t('ui.tb.fmore.extendsurf.title')],
                     ['trimsurf', 'scissors', Lang::t('ui.tb.fmore.trimsurf'), Lang::t('ui.tb.fmore.trimsurf.title')],
                 ] as $__m): ?>
-                  <?php if ($__m === null): ?><hr><?php continue; endif; ?>
+                  <?php if (is_string($__m)): ?><hr><div class="pc-menu-h" role="presentation"><?= Lang::e($__m) ?></div><?php continue; endif; ?>
                   <button type="button" role="menuitem" data-cmd="<?= e($__m[0]) ?>" title="<?= e($__m[3]) ?>"><i class="bi bi-<?= e($__m[1]) ?>" aria-hidden="true"></i> <?= e($__m[2]) ?></button><?php /* i18n-ignore: $__m holds Lang::t() texts */ ?>
                 <?php endforeach; ?>
-                <hr>
-                <?php foreach ([['rib', 'triangle', 'rib.menu'], null, ['sheetbase', 'file-earmark', 'sheet.menu.base'], ['sheetflange', 'arrow-90deg-up', 'sheet.menu.flange']] as $__m): ?>
-                  <?php if ($__m === null): ?><hr><?php continue; endif; ?>
+                <?php foreach (['ui.tb.fmore.h.details', ['rib', 'triangle', 'rib.menu'], ['thread', 'nut', 'thread.menu'], 'ui.tb.fmore.h.sheet', ['sheetbase', 'file-earmark', 'sheet.menu.base'], ['sheetflange', 'arrow-90deg-up', 'sheet.menu.flange']] as $__m): ?>
+                  <?php if (is_string($__m)): ?><hr><div class="pc-menu-h" role="presentation"><?= Lang::e($__m) ?></div><?php continue; endif; ?>
                   <button type="button" role="menuitem" data-cmd="<?= e($__m[0]) ?>" title="<?= Lang::e($__m[2] . '.title') ?>"><i class="bi bi-<?= e($__m[1]) ?>" aria-hidden="true"></i> <?= Lang::e($__m[2]) ?></button>
                 <?php endforeach; ?>
               </div>
@@ -204,15 +204,17 @@ $__tools = [
             <details class="pc-menu" data-export-menu>
               <summary class="pc-tool" title="<?= Lang::e('ui.tb.export.title') ?>"><i class="bi bi-box-arrow-up-right" aria-hidden="true"></i><span><?= Lang::e('ui.tb.export') ?></span></summary>
               <div class="pc-menu-list" role="menu">
+                <button type="button" role="menuitem" data-cmd="export-print"><?= Lang::e('ui.tb.export.print') ?></button>
                 <button type="button" role="menuitem" data-cmd="export-stl"><?= Lang::e('ui.tb.export.stl') ?></button>
                 <button type="button" role="menuitem" data-cmd="export-3mf"><?= Lang::e('ui.tb.export.3mf') ?></button>
                 <button type="button" role="menuitem" data-cmd="export-step"><?= Lang::e('ui.tb.export.step') ?></button>
                 <button type="button" role="menuitem" data-cmd="export-step214"><?= Lang::e('ui.tb.export.step214') ?></button>
                 <button type="button" role="menuitem" data-cmd="export-step-faceted"><?= Lang::e('ui.tb.export.step_faceted') ?></button>
                 <button type="button" role="menuitem" data-cmd="export-step214-faceted"><?= Lang::e('ui.tb.export.step214_faceted') ?></button>
+                <button type="button" role="menuitem" data-cmd="export-ifc" title="<?= Lang::e('ui.tb.export.ifc.title') ?>"><?= Lang::e('ui.tb.export.ifc') ?></button>
                 <button type="button" role="menuitem" data-cmd="export-sw-step" title="<?= Lang::e('ui.tb.export.sw_step.title') ?>"><?= Lang::e('ui.tb.export.sw_step') ?></button>
                 <button type="button" role="menuitem" data-cmd="export-sw-macro" title="<?= Lang::e('ui.tb.export.sw_macro.title') ?>"><?= Lang::e('ui.tb.export.sw_macro') ?></button>
-                <a role="menuitem" class="pc-menu-link" href="<?= e($__build['url']) ?>CadCraftExport.swb" download="CadCraftExport.swb" title="<?= Lang::e('ui.tb.export.sw_back.title') ?>"><?= Lang::e('ui.tb.export.sw_back') ?></a>
+                <a role="menuitem" class="pc-menu-link" data-sw-back href="<?= e($__build['url']) ?>CadCraftExport.swb" download="CadCraftExport.swb" title="<?= Lang::e('ui.tb.export.sw_back.title') ?>"><?= Lang::e('ui.tb.export.sw_back') ?></a>
                 <button type="button" role="menuitem" data-cmd="export-dxf"><?= Lang::e('ui.tb.export.dxf') ?></button>
                 <button type="button" role="menuitem" data-cmd="export-drawing"><?= Lang::e('ui.tb.export.drawing') ?></button>
                 <button type="button" role="menuitem" data-cmd="export-bom" hidden><?= Lang::e('ui.tb.export.bom') ?></button>
@@ -278,6 +280,7 @@ $__tools = [
     <div class="pc-tabs" role="tablist" aria-label="<?= Lang::e('ui.right.aria') ?>" data-right-tabs>
       <button type="button" class="pc-tab" role="tab" id="pc-tab-props" aria-controls="pc-sec-props" aria-selected="true" data-tab="props"><?= Lang::e('ui.right.props') ?></button>
       <button type="button" class="pc-tab" role="tab" id="pc-tab-params" aria-controls="pc-sec-params" aria-selected="false" tabindex="-1" data-tab="params"><?= Lang::e('ui.right.params') ?></button>
+      <button type="button" class="pc-tab" role="tab" id="pc-tab-script" aria-controls="pc-sec-script" aria-selected="false" tabindex="-1" data-tab="script" title="<?= Lang::e('ui.right.script.title') ?>"><?= Lang::e('ui.right.script') ?></button>
     </div>
     <section class="pc-sec" id="pc-sec-props" role="tabpanel" aria-labelledby="pc-tab-props">
       <h2 class="pc-h" data-props-h><?= Lang::e('ui.right.props') ?></h2>
@@ -286,6 +289,11 @@ $__tools = [
     <section class="pc-sec" id="pc-sec-params" role="tabpanel" aria-labelledby="pc-tab-params" hidden>
       <h2 class="pc-h"><?= Lang::e('ui.right.params') ?></h2>
       <div data-params></div>
+    </section>
+    <section class="pc-sec" id="pc-sec-script" role="tabpanel" aria-labelledby="pc-tab-script" hidden>
+      <h2 class="pc-h"><?= Lang::e('ui.right.script') ?></h2>
+      <p class="pc-note" data-script-tab-note><?= Lang::e('ui.right.script.note') ?></p>
+      <div data-script-tab></div>
     </section>
   </aside>
 

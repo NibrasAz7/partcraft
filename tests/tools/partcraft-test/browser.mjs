@@ -568,7 +568,9 @@ g = GProp_GProps(); BRepGProp.VolumeProperties_s(s, g); print(g.Mass(), BRepChec
   const W2 = await pc(() => window.partcraft.asmPlace.world.get(window.partcraft.asm.instances[1].id));
   ok(near(W2[13], 0, 1e-6) && near(W2[5], -1, 1e-9) && near(W2[12], 0, 1e-6), 'the copy turned over onto the first flange (face to face, same axis)');
   await page.click('.pc-tools [data-cmd="asm-check"]');
-  ok((await pc(() => window.partcraft.clashes.length)) === 0 && /No interference/.test(await statusText()), 'Clash: no interference');
+  // face to face: since 0.5 WL.33 that is reported as touching faces, never as an overlap
+  const cl0 = await pc(() => window.partcraft.clashes.map((c) => c.kind));
+  ok(cl0.length === 1 && cl0[0] === 'touch' && /touching faces/.test(await statusText()), 'Clash: no overlap; the two flanges face to face are touching faces');
   const off = page.locator('.pc-right label:has-text("Offset") + input');
   await off.fill('-2'); await off.press('Enter');
   await asmBuilt();

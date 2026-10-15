@@ -363,7 +363,7 @@ export function installDesignUI(host) {
       else out.push({ id, kind: 'point', p: g.p, selected });
     }
     // cosmetic threads: the major diameter, dashed, at the top and the thread's end
-    for (const [, t] of regen.threads || []) for (const th of t.list) {
+    for (const [, t] of regen.threads || []) for (const th of t.modelled ? [] : t.list) {   // a modelled thread is its own geometry
       const fr = V.frameFor(th.d, th.o);
       for (const z of [0, th.depth]) {
         const c = V.add(th.o, V.mul(th.d, z));

@@ -17,6 +17,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { BASE_PLANES, toWorld } from './vec.js';
 import { planarGroups } from './faces.js';
+import { onMouse } from './input-mouse.js';   // 0.5 IP.3: the menu style's buttons and wheel (input-partcraft.js)
 
 const tv = (a) => new THREE.Vector3(a[0], a[1], a[2]);
 export { THREE };   // workspaces get it as host.THREE (their modules stay importable in Node)
@@ -36,6 +37,16 @@ export class View3D {
     this.controls.screenSpacePanning = true;
     this.controls.zoomToCursor = true;
     this.setOrbitButton('left');
+    // the menu style's mouse (Settings › PartCraft › Menus, keys and mouse): its buttons win over the orbit setting when it
+    // sets them (orbit3d), else the setting's; the wheel's speed and direction (a pinch, ctrl+wheel, is never turned round)
+    this._inputOff = onMouse((mm) => { this._inputMouse = mm; this.setOrbitButton(this.orbitButton); this.controls.zoomSpeed = mm.zoomSpeed; this._wheelFlip = mm.wheel === -1; });
+    canvas.addEventListener('wheel', (e) => {
+      if (!this._wheelFlip || e.ctrlKey || e.ccFlipped) return;
+      e.stopImmediatePropagation(); e.preventDefault();
+      const f = new WheelEvent('wheel', { deltaX: e.deltaX, deltaY: -e.deltaY, deltaZ: e.deltaZ, deltaMode: e.deltaMode, clientX: e.clientX, clientY: e.clientY, screenX: e.screenX, screenY: e.screenY, shiftKey: e.shiftKey, altKey: e.altKey, metaKey: e.metaKey, bubbles: true, cancelable: true });
+      f.ccFlipped = true;
+      canvas.dispatchEvent(f);
+    }, { capture: true, passive: false });
     this.controls.addEventListener('change', () => this.render());
     // trackpad (Settings › PartCraft › Scrolling): a two-finger swipe orbits, Shift + swipe pans; a pinch
     // (wheel + ctrlKey) is left to OrbitControls, which zooms. Caught on the way down, before OrbitControls sees it.
@@ -535,6 +546,8 @@ export class View3D {
    *  'middle' (middle orbits, Shift/Ctrl + middle or right pans; the left button only picks). */
   setOrbitButton(which) {
     this.orbitButton = which === 'middle' ? 'middle' : 'left';
+    const o = this._inputMouse?.orbit3d, ACT = { orbit: THREE.MOUSE.ROTATE, pan: THREE.MOUSE.PAN, zoom: THREE.MOUSE.DOLLY, none: null };
+    if (o) { this.controls.mouseButtons = { LEFT: ACT[o.left] ?? null, MIDDLE: ACT[o.middle] ?? null, RIGHT: ACT[o.right] ?? null }; return; }   // IP.3: the style's
     this.controls.mouseButtons = this.orbitButton === 'middle'
       ? { LEFT: null, MIDDLE: THREE.MOUSE.ROTATE, RIGHT: THREE.MOUSE.PAN }
       : { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.PAN };

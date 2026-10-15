@@ -14,6 +14,8 @@
  *   surface records  { name, type: 'plane', n, o } | { name, type: 'cylinder', axis: { o, d }, r }
  *                    | { name, type: 'cone', axis: { o (apex), d (unit, opening direction) }, k (tan of the half angle) }
  *                    | { name, type: 'sphere', c, r } | { name, type: 'torus', axis: { o (centre), d }, R, r }   (revolved arcs)
+ *                    | { name, type: 'thread', axis: { o, d }, r0, r1, t0, t1 }   (a modelled thread's helical flanks, crests and roots:
+ *                      every triangle between radii r0–r1 and heights t0–t1 along the axis; 0.5 WL.29)
  *                    | { name, type: 'other' }   (spline sides: named, not classified)
  *   moveSurfs(surfs, M4, suffix)          copies for a pattern or mirror: points and directions moved, names + suffix
  *   namedFaces(mesh, triTool, toolSurfs, { segments })  → { triFace, faces, edges, edgeSegs, segEdge }
@@ -31,6 +33,7 @@ export const cone = (name, apex, d, k) => ({ name, type: 'cone', axis: { o: [...
 export const sphere = (name, c, r) => ({ name, type: 'sphere', c: [...c], r });
 export const torus = (name, c, d, R, r) => ({ name, type: 'torus', axis: { o: [...c], d: V.norm(d) }, R, r });
 export const other = (name) => ({ name, type: 'other' });
+export const thread = (name, o, d, r0, r1, t0, t1) => ({ name, type: 'thread', axis: { o: [...o], d: V.norm(d) }, r0, r1, t0, t1 });
 /** A surface limited to a hole's radius about its axis (o, d), or to a sketch line's extent from a along unit d. */
 export const within = (s, o, d, r) => ({ ...s, within: { o: [...o], d: V.norm(d), r } });
 export const span = (s, a, b) => { const d = V.sub(b, a), len = V.len(d); return { ...s, span: { a: [...a], d: V.mul(d, 1 / len), len } }; };
@@ -49,7 +52,7 @@ export function moveSurfs(surfs, M, suffix) {
     if (s.span) moved.span = { ...s.span, a: V.applyMat(M, s.span.a), d: V.norm(dirOf(M, s.span.d)) };
     s = { ...s, ...moved };
     if (s.type === 'plane') return { ...s, name, n: V.norm(dirOf(M, s.n)), o: V.applyMat(M, s.o) };
-    if (s.type === 'cylinder' || s.type === 'cone' || s.type === 'torus') return { ...s, name, axis: { o: V.applyMat(M, s.axis.o), d: V.norm(dirOf(M, s.axis.d)) } };
+    if (s.type === 'cylinder' || s.type === 'cone' || s.type === 'torus' || s.type === 'thread') return { ...s, name, axis: { o: V.applyMat(M, s.axis.o), d: V.norm(dirOf(M, s.axis.d)) } };
     if (s.type === 'sphere') return { ...s, name, c: V.applyMat(M, s.c) };
     return { ...s, name };
   });
@@ -79,6 +82,10 @@ function onSurface(s, P, nt, tol, sag) {
   if (s.type === 'torus') {
     return P.every((p) => { const [rho, h] = radial(p, s.axis); const d = Math.hypot(rho - s.R, h) - s.r; return d <= tol && d >= -(tol + sag * (s.R + s.r)); });
   }
+  if (s.type === 'thread') {
+    if (nt && Math.abs(V.dot(nt, s.axis.d)) > 0.99) return false;   // a flat end, not the thread
+    return P.every((p) => { const [rho, h] = radial(p, s.axis); return rho >= s.r0 - tol - sag * s.r0 && rho <= s.r1 + tol && h >= s.t0 - tol && h <= s.t1 + tol; });
+  }
   return false;
 }
 
@@ -106,7 +113,7 @@ export function namedFaces(mesh, triTool, toolSurfs, { segments = 64 } = {}) {
     const longest = Math.max(Math.hypot(...sub(b, a)), Math.hypot(...sub(c, b)), Math.hypot(...sub(a, c)));
     const n = ln > 1e-6 * longest * longest ? [triN[t * 3], triN[t * 3 + 1], triN[t * 3 + 2]] : null;
     let hit = -1;
-    for (const want of ['plane', 'cylinder', 'cone', 'sphere', 'torus']) {
+    for (const want of ['plane', 'cylinder', 'cone', 'sphere', 'torus', 'thread']) {
       hit = surfs.findIndex((s) => s.type === want && onSurface(s, [a, b, c], n, tol, sag));
       if (hit >= 0) break;
     }
@@ -174,6 +181,7 @@ export function namedFaces(mesh, triTool, toolSurfs, { segments = 64 } = {}) {
     } else if (s.type === 'cylinder') { rec.axis = { o: [...s.axis.o], d: [...s.axis.d] }; rec.r = s.r; }
     else if (s.type === 'cone') { rec.axis = { o: [...s.axis.o], d: [...s.axis.d] }; rec.surf = { type: 'cone', o: [...s.axis.o], d: [...s.axis.d], r0: 0, k: s.k }; }
     else if (s.type === 'sphere') rec.surf = { type: 'sphere', c: [...s.c], r: s.r };
+    else if (s.type === 'thread') { rec.axis = { o: [...s.axis.o], d: [...s.axis.d] }; rec.r = s.r1; }
     else if (s.type === 'torus') { rec.axis = { o: [...s.axis.o], d: [...s.axis.d] }; rec.surf = { type: 'torus', c: [...s.axis.o], d: [...s.axis.d], R: s.R, r: s.r }; }
     // (rec.surf: the exact surface the tet mesher projects onto, in surfaces.js's form, as brep-surf.js writes it)
     return rec;

@@ -55,6 +55,10 @@ If you design parts in SolidWorks, most of PartCraft's ideas will be familiar: s
 | Zoom to fit (F) | {{key:F}}, or {{ui:Fit}} (in a sketch, {{key:F}} is the Fillet tool) |
 | Right-click menus | None. Right-drag pans; in a sketch, right-click ends a line chain |
 
+:::tip
+If your hands know SolidWorks, pick the {{ui:Feature tree}} menu style in {{ui:Settings}} › {{ui:PartCraft}} › {{ui:Menus, keys and mouse}}: a ribbon of Features, Sketch, Surfaces, Evaluate, Drawing, Assembly and View tabs, the middle button orbits, {{key:Shift}} and the middle button pan, and the left button only picks. See [Menus, keys and mouse](topic:menus-keys-and-mouse).
+:::
+
 ## Differences that trip people up
 
 **The whole sketch is the profile.** Extrude and Revolve use every closed loop in the sketch. You cannot pick one region or one contour of a sketch for a feature. Use one sketch per feature.

@@ -3,7 +3,7 @@ title: Write and run scripts (Script workspace)
 summary: The Script workspace step by step: write a CraftScript or Lua script, run it with F5, read the console, keep results in the variables for the next script, show meshes, fields and plots, stop a run, and save scripts with the part.
 section: tasks
 order: 145
-keywords: script, scripting, CraftScript, Lua, code, program, editor, console, REPL, command line, run, F5, run selection, stop, variables, workspace, plot, field, mesh, legend, sub-display, analysis, automation, matrix, numerical
+keywords: script, scripting, script while modelling, pop out, second screen, second monitor, param, params, parameters in scripts, CraftScript, Lua, code, program, editor, console, REPL, command line, run, F5, run selection, stop, variables, workspace, plot, field, mesh, legend, sub-display, analysis, automation, matrix, numerical
 ---
 
 **Preview.** Scripting is new in PartCraft 0.3 and is a preview: the language, the library and the way scripts are saved may still change, and scripts written now may need small edits later. Tell us what breaks.
@@ -11,6 +11,14 @@ keywords: script, scripting, CraftScript, Lua, code, program, editor, console, R
 The Script workspace runs your own calculations next to the part: small sums, whole analyses, or the scripts in the [analysis library](topic:craftscript-library). Scripts are written in **CraftScript** (a matrix language much like MATLAB, see [The CraftScript language](topic:craftscript-language)) or in **Lua** (see [Scripts in Lua](topic:craftscript-lua)) or **Python** (see [Scripts in Python](topic:craftscript-python)).
 
 Choose **Script** in the **Workspace** box at the left of the toolbar. The part is not changed. The right panel becomes the script panel (wider than usual; drag its edge to change it, or move it to a second screen with its {{ui:⋯}} menu, see [Arrange the panels](common:arrange-panels)).
+
+## Script while you model
+
+You do not have to leave the Design workspace to write a script. In Design, the right panel's {{ui:Script}} tab holds the same editor, console, variables and library, with the same scripts. The feature tree and the view keep working: click a feature to select it, double-click a sketch to edit it, turn the view, then go back to the {{ui:Script}} tab and press {{key:F5}}.
+
+What a script **shows** (meshes, fields, plots, tables) is not drawn over your model in Design: the console says so, and the Script workspace has it all when you switch to it.
+
+{{ui:Pop out}}, beside {{ui:Run}}, moves the whole panel to a window of its own, for example on a second screen, so the editor and the full view sit side by side. {{ui:Put back}} docks it again. See [Arrange the panels](common:arrange-panels).
 
 ## Run your first script
 
@@ -63,6 +71,17 @@ Every top-level variable a script makes lands in the **Variables** tab (name, ty
 - {{ui:Open}} in the Script group (or drop files on the view or the panel): `.craft`, `.lua` and `.py` files open as new scripts (they do not run); data files (STL, OBJ, CSV, JSON, NPY, HDF5) load into the variables under their file name.
 - {{ui:Save}} in the Script group downloads the current script as a file.
 - {{ui:New}} in the Script group (or {{ui:+}} by the tabs) starts another script. Double-click a tab to rename it; its {{ui:×}} removes it (you can undo that).
+
+## Read the part's parameters
+
+A script reads the part's parameters (see [Drive a part with parameters](topic:parameters)) by name:
+
+```
+w = param('width');     % one parameter's value, in mm (or degrees, or a plain number)
+p = params();           % all of them, as a struct: p.width, p.height
+```
+
+In Lua and Python they are `cs.param('width')` and `cs.params()`. Scripts only read parameters: change them on the {{ui:Parameters}} tab. Under the script's tab, a line lists the parameters it reads with `param('…')`, and marks any the part does not have; the {{ui:Parameters}} tab lists the script under each one. A name built while the script runs, such as `param(name)`, is not listed.
 
 ## Scripts are saved in the part
 

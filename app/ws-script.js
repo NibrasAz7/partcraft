@@ -18,6 +18,8 @@ import * as C from './cs-ui.js';
 import { typeOf, valueText, isTensor, fmtNum } from './cs-values.js';
 import { colorsFor, gradientCss, sig } from './sim-ui.js';
 import { t } from './i18n.js';
+import { evaluateVars } from './params.js';
+import { scriptParams } from './params-uses.js';
 
 /** The worker's modules: builder A's cs-worker.js (the whole runtime through cs-all.js). */
 export const WORKER_MODULES = ['cs-worker.js'];
@@ -34,6 +36,7 @@ const S = {
   info: null, panel: 'editor', lib: { state: 'idle', groups: [], sel: null, doc: '', text: '' },
   ui: null, host: null, flushTimer: 0, pending: { prints: [], displays: [], raf: 0 }, history: [], histPos: 0,
   budget: 2e9, savedVars: null, varsOffered: false,
+  docked: false, dockNoted: 0,   // the editor in the Design workspace's Script tab (0.5 WL.31)
 };
 const tabOf = () => S.tabs[S.active] || null;
 const partTabs = () => S.tabs.filter((tab) => !tab.lib);
@@ -130,6 +133,8 @@ function drain(host) {
     const seen = new Set(), keep = [];
     for (let i = disp.length - 1; i >= 0; i--) { const d = disp[i], k = dispKey(d); if (k && seen.has(k)) continue; if (k) seen.add(k); keep.unshift(d); }
     for (const d of keep) display(host, d);
+    // in the Design workspace's Script tab nothing is drawn: say once per run where it is
+    if (S.docked && keep.length && S.dockNoted !== S.runSeq) { S.dockNoted = S.runSeq; say('note', t('script.ws.docked_displays')); }
   }
 }
 const dispKey = (d) => (d && d.plot ? (optsOf(d, 'plot').append ? '' : keyOf(d, 'plot')) : d && d.table !== undefined ? keyOf(d, 'table') : d && d.image ? keyOf(d, 'image') : '');
@@ -181,7 +186,7 @@ async function run(host, { selection = false, source = null, repl = false } = {}
   try {
     const eng = engine(host);
     if (!S.info) await info(host);
-    const r = await eng.run(text, { lang, file, budget: S.budget, files: partTabs().map((x) => ({ name: x.name, lang: x.lang, text: x.text })), libBase: libUrl(''), part: /\b(part|bodies)\b/.test(text) ? partModel(host) : undefined });
+    const r = await eng.run(text, { lang, file, budget: S.budget, files: partTabs().map((x) => ({ name: x.name, lang: x.lang, text: x.text })), libBase: libUrl(''), part: /\b(part|bodies)\b/.test(text) ? partModel(host) : undefined, params: paramValues(host.part) });
     if (id !== S.runSeq) return null;
     drain(host);
     S.vars = r.list || S.vars;
@@ -229,6 +234,13 @@ function partModel(host) {
   const m = host.regen && host.regen.mesh;
   if (!m || !m.positions || !m.indices) return null;
   return { t: 'model', source: 'part', ref: String(host.part.name || 'Part').slice(0, 120) /* i18n-ignore: a data reference */, mesh: { t: 'mesh', kind: 'tri', nodes: Float64Array.from(m.positions), elems: Int32Array.from(m.indices) } };
+}
+/** The part's parameters with a value, { name: number }, for param() / params() (0.5 WL.30). */
+function paramValues(part) {
+  const out = {};
+  if (!part || !part.params || !part.params.vars?.length) return out;
+  for (const [k, v] of evaluateVars(part.params).values) if (Number.isFinite(v)) out[k] = v;
+  return out;
 }
 /** A script saved a file (save('x.csv', …)): the page downloads it. */
 function savedByScript(host, f) {
@@ -328,6 +340,7 @@ function fitShown(host) {
 function drawShown(host) {
   const { view, THREE } = host;
   for (const id of [...view.overlays.keys()]) if (id.startsWith('script-')) view.setOverlay(id, null);
+  if (S.docked) { view.setPartVisible(true); return; }   // Design's view stays the part's; the Script workspace shows the rest
   for (const it of S.shown) if (it.visible && it.surf) view.setOverlay('script-' + it.id, objectFor(host, it));
   view.setPartVisible(S.partShown);
   renderShownBox(host);
@@ -565,6 +578,9 @@ function renderTabs() {
     el('button', { type: 'button', className: 'cs-x', title: tab.lib ? t('script.ws.tab.close', { name: tab.name }) : t('script.ws.tab.remove_title', { name: tab.name }), 'aria-label': tab.lib ? t('script.ws.tab.close', { name: tab.name }) : t('script.ws.tab.remove', { name: tab.name }), onclick: () => closeTab(S.host, i) }, el('i', { className: 'bi bi-x', 'aria-hidden': 'true' })))),
   el('button', { type: 'button', className: 'cs-tab-add', title: t('script.ws.tab.new_title'), 'aria-label': t('script.ws.tab.new'), dataset: { csNewTab: '1' }, onclick: () => newScript(S.host) }, el('i', { className: 'bi bi-plus-lg', 'aria-hidden': 'true' })));
 }
+/** The tab note (the parameters a script reads) follows the text as it is typed, a moment after typing stops. */
+let noteTimer = 0;
+function noteSoon() { clearTimeout(noteTimer); noteTimer = setTimeout(renderTabNote, 400); }
 function renderTabNote() {
   if (!S.ui) return;
   const { el } = S.host, tab = tabOf(), n = S.ui.tabNote;
@@ -578,6 +594,15 @@ function renderTabNote() {
   }
   const libNames = new Set(S.lib.groups.flatMap((g) => g.items.map((x) => x.name)));
   if (libNames.has(tab.name)) { n.hidden = false; n.append(t('script.ws.shadows_lib', { name: tab.name })); }
+  // the part's parameters this script reads (param('name') / params(); 0.5 WL.30), the ones the part lacks marked
+  const rp = scriptParams(tab.text);
+  if (rp.names.length || rp.all) {
+    const have = new Set((S.host.part?.params?.vars || []).map((v) => v.name)), missing = rp.names.filter((x) => !have.has(x));
+    if (!n.hidden) n.append(el('br'));
+    n.hidden = false;
+    n.append(el('span', { dataset: { csReadsParams: rp.names.join(',') } }, rp.all ? t('script.ws.reads_all_params') : t('script.ws.reads_params', { list: rp.names.join(', '), n: rp.names.length })));
+    if (missing.length) n.append(' ', el('span', { className: 'is-bad', dataset: { csMissingParams: missing.join(',') } }, t('script.ws.missing_params', { list: missing.join(', '), n: missing.length })));
+  }
 }
 function newScript(host) {
   const tab = addTab(host, 'script' + (partTabs().length + 1), tabOf() ? tabOf().lang : 'craft', '');
@@ -784,7 +809,28 @@ function updateBar(host) {
   S.ui.replInput.disabled = false;
   if (!S.busy) S.ui.runState.textContent = S.info && S.info.stub ? t('script.ws.stub') : '';
   S.ui.root.classList.toggle('is-busy', S.busy);
+  updatePopOut();
   void tab; void host;
+}
+
+/** The right panel (this editor's) in a window of its own: app-panels.js when the build has it. → { can, out (in a window), n } */
+function panelWindow() {
+  const P = typeof window !== 'undefined' ? window.ccShellPanels : null;
+  const me = P && P.panels ? P.panels().find((x) => x.id === 'right') : null;
+  return { can: !!(P && me && (me.inWindow || typeof P.openWindow === 'function')), out: !!(me && me.inWindow), n: me ? me.win : null };
+}
+function updatePopOut() {
+  if (!S.ui) return;
+  const w = panelWindow();
+  S.ui.popBtn.hidden = !w.can;
+  S.ui.popBtn.lastChild.textContent = t(w.out ? 'script.ws.pop_in' : 'script.ws.pop_out');
+  S.ui.popBtn.title = t(w.out ? 'script.ws.pop_in.title' : 'script.ws.pop_out.title');
+}
+function popOut() {
+  const P = window.ccShellPanels, w = panelWindow();
+  if (!P) return;
+  if (w.out) P.closeWindow(w.n); else P.openWindow(['right']);
+  setTimeout(updatePopOut, 300);
 }
 
 function buildUi(host) {
@@ -794,7 +840,7 @@ function buildUi(host) {
     onRun: () => run(host),
     onRunSelection: () => run(host, { selection: true }),
     onFlush: () => { saveTabText(); flush(host); },
-    onChange: (v) => { const tab = tabOf(); if (tab && !tab.lib) { tab.text = v; tab.touched = true; flushSoon(host); } },
+    onChange: (v) => { const tab = tabOf(); if (tab && !tab.lib) { tab.text = v; tab.touched = true; flushSoon(host); noteSoon(); } },
     words: () => (S.vars || []).map((v) => v.name),   // autocomplete: the workspace's variables (0.4 P7)
   });
   editor.textarea.addEventListener('focusout', () => { setTimeout(() => { saveTabText(); flush(host); }, 0); });
@@ -805,6 +851,9 @@ function buildUi(host) {
   const selBtn = btn(t('script.ws.cmd.sel'), 'play', t('script.ws.cmd.sel.title'), () => run(host, { selection: true }), { csRunSel: '1' });
   const stopBtn = btn(t('script.ws.cmd.stop'), 'stop-fill', t('script.ws.cmd.stop.title'), () => stop(host), { csStop: '1' });
   runBtn.classList.add('is-primary');
+  // the panel to a window of its own (a second monitor; the shell's app-panels.js) and back (0.5 WL.31)
+  const popBtn = btn(t('script.ws.pop_out'), 'box-arrow-up-right', t('script.ws.pop_out.title'), () => popOut(), { csPopOut: '1' });
+  popBtn.hidden = true;
   const runState = el('span', { className: 'cs-run-state', role: 'status' });
   const tabs = el('div', { className: 'cs-tabs', role: 'tablist', 'aria-label': t('script.ws.scripts') });
   const tabNote = el('p', { className: 'pc-note cs-tab-note', hidden: true });
@@ -830,7 +879,7 @@ function buildUi(host) {
   const clearLog = el('button', { type: 'button', className: 'pc-btn pc-btn-sm', onclick: () => log.replaceChildren(), dataset: { csClearConsole: '1' } }, t('script.ws.clear'));
   const editorPane = el('div', { className: 'cs-pane', role: 'tabpanel', id: 'cs-pane-editor', 'aria-labelledby': 'cs-ptab-editor' },
     tabs,
-    el('div', { className: 'cs-bar' }, lang, runBtn, selBtn, stopBtn, runState),
+    el('div', { className: 'cs-bar' }, lang, runBtn, selBtn, stopBtn, runState, popBtn),
     tabNote,
     editor.root,
     el('div', { className: 'cs-con-head' }, el('h3', { className: 'cs-h' }, t('script.ws.console')), clearLog),
@@ -856,7 +905,7 @@ function buildUi(host) {
   root.addEventListener('drop', (e) => { if (e.dataTransfer && e.dataTransfer.files.length) { e.preventDefault(); openFiles(host, e.dataTransfer.files); } });
   const dock = createDock({ el, download: (name, blob) => host.downloadBlob(name, blob, blob.type) });   // plot export (0.4 P9)
   const shownBox = el('div', { className: 'cs-shown', dataset: { csShown: '1' }, hidden: true });
-  S.ui = { root, editor, lang, runBtn, selBtn, stopBtn, runState, tabs, tabNote, log, replInput, varsPane, libPane, varsTab: paneTabs.vars, paneTabs, panes: { editor: editorPane, vars: varsPane, lib: libPane }, dock, shownBox };
+  S.ui = { root, editor, lang, runBtn, selBtn, stopBtn, popBtn, runState, tabs, tabNote, log, replInput, varsPane, libPane, varsTab: paneTabs.vars, paneTabs, panes: { editor: editorPane, vars: varsPane, lib: libPane }, dock, shownBox };
   try { const v = JSON.parse(localStorage.getItem('partcraft.script') || '{}'); if (BUDGETS.some(([b]) => b === v.budget)) { S.budget = v.budget; budget.value = String(v.budget); } } catch { /* defaults */ }
   say('note', t('script.ws.welcome'));
 }
@@ -874,6 +923,32 @@ function renderPanel(host, box) {
   S.ui.editor.refresh();
   return t('script.ws.label');
 }
+
+/**
+ * The same editor in the Design workspace's Script tab (0.5 WL.31): scripts, console, variables and library, while the feature
+ * tree and the view work as in Design. Nothing a script shows is drawn there (the Script workspace keeps it: the console says
+ * so once per run). partcraft.js calls dockEditor when the tab opens and undockEditor when it closes or Design is left.
+ */
+export function dockEditor(host, box) {
+  S.host = host;
+  if (!S.ui) buildUi(host);
+  syncFromPart(host);
+  if (!S.ui.tabs.childElementCount) loadTab();
+  S.docked = true;
+  if (S.ui.root.parentNode !== box) box.append(S.ui.root);
+  renderTabs(); renderTabNote(); renderVars(host); renderLib(host); updateBar(host);
+  drawShown(host);
+  loadLibrary(host);
+  info(host).then(() => updateBar(host));
+  S.ui.editor.refresh();
+}
+export function undockEditor(host) {
+  if (!S.ui || !S.docked) return;
+  S.docked = false;
+  saveTabText();
+  flush(host);
+}
+export const editorDocked = () => S.docked;
 
 // ---------------------------------------------------------------- stage: the dock and the "Shown" box, drops
 
@@ -938,6 +1013,7 @@ lazyLabels(registerWorkspace({
   groups: [Object.defineProperties({ items: Object.keys(CMD_LABELS).map((cmd) => Object.defineProperties({ cmd, icon: ICONS[cmd] }, getters(CMD_LABELS[cmd]))) }, getters(GROUP_LABEL))],
   enter(host) {
     S.host = host;
+    S.docked = false;   // the Design tab's editor comes home
     if (!S.ui) buildUi(host);
     syncFromPart(host);
     enterStage(host);

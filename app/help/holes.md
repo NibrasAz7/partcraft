@@ -3,7 +3,7 @@ title: Drill holes and counterbores at sketch points
 summary: Put points in a sketch on a face, make simple, counterbored, countersunk or tapped (ISO metric) holes at every point, set diameter and depth, and fix holes that drill the wrong way.
 section: tasks
 order: 60
-keywords: hole, hole wizard, drill, counterbore, cbore, countersink, csink, tapped hole, thread, tap drill, metric thread, M6, through all, blind hole, bolt hole, points, hole centers
+keywords: hole, hole wizard, drill, modelled thread, 3D printing, counterbore, cbore, countersink, csink, tapped hole, thread, tap drill, metric thread, M6, through all, blind hole, bolt hole, points, hole centers
 ---
 
 {{ui:Hole}} drills one hole at each loose point of a sketch. A loose point is one made with the Point tool, not the end of a line or the center of a circle.
@@ -68,8 +68,10 @@ Set **Type** to **Tapped (ISO metric)** and choose the **Thread**, M2 to M24 coa
 | Pitch | 0.4 | 0.45 | 0.5 | 0.7 | 0.8 | 1 | 1.25 | 1.5 | 1.75 | 2 | 2 | 2.5 | 2.5 | 2.5 | 3 |
 | Tap drill ⌀ | 1.6 | 2.05 | 2.5 | 3.3 | 4.2 | 5 | 6.8 | 8.5 | 10.2 | 12 | 14 | 15.5 | 17.5 | 19.5 | 21 |
 
-The thread itself is **cosmetic**: the model has the drilled hole, the view draws the thread's major diameter as dashed circles, and the drawing sheet carries the callout as a note, such as "4× M8×1.25 - 6H, thread through". STEP exports the drilled hole only.
+The thread is **cosmetic** at first: the model has the drilled hole, the view draws the thread's major diameter as dashed circles, and the drawing sheet carries the callout as a note, such as "4× M8×1.25 - 6H, thread through". STEP exports the drilled hole only.
+
+Tick **Modelled** to cut the real helical thread into the hole, for 3D printing. **Clearance (mm)** makes it that much larger all round, so a printed bolt fits: 0.1 to 0.2 mm suits most printers. The callout then ends "(modelled)". See [Threads on shafts and bores, drawn or modelled](topic:threads), which also puts threads on shafts.
 
 :::note
-Counterdrilled holes, inch threads, pipe threads and modelled (helical) threads are not built yet.
+Counterdrilled holes, inch threads and pipe threads are not built yet.
 :::

@@ -119,4 +119,4 @@ Every number box takes effect when you press {{key:Enter}} or {{key:Tab}}, or cl
 
 ## On a narrow screen
 
-Below about 760 pixels wide the panels stack: the toolbar (it scrolls sideways), the view, the status bar, then the properties panel and the history below. Scroll the page to reach them. See [Trackpad, touch and small screens](topic:trackpad-and-touch).
+Up to 760 pixels wide, such as on a phone, the view keeps the screen: the toolbar is one row that scrolls sideways, and the panels open as sheets from a bar at the bottom. {{ui:Tools}} hides the toolbar and {{ui:Move}} puts it at the bottom. See [Trackpad, touch and small screens](topic:trackpad-and-touch).

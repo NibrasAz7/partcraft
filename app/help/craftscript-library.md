@@ -3,14 +3,14 @@ title: The analysis library
 summary: The library of readable analysis scripts in the Script workspace: what is in each group, opening a function read-only, its header with method, references and a check, making your own copy, and how a copy takes over from the library function.
 section: tasks
 order: 146
-keywords: library, craftlib, analysis, static, modal, thermal, topology optimization, top88, SIMP, electromagnetics, electrostatics, magnetostatics, fluid, lattice Boltzmann, LBM, mesh, voxel, tetrahedra, references, check, verification, copy, shadow
+keywords: library, craftlib, analysis, electromagnet, static, modal, thermal, topology optimization, top88, SIMP, electromagnetics, electrostatics, magnetostatics, fluid, lattice Boltzmann, LBM, mesh, voxel, tetrahedra, references, check, verification, copy, shadow
 ---
 
 The analysis library is a set of scripts, each a function you can read from top to bottom: how the stiffness matrix is assembled, where the boundary conditions go, which solver runs, how the results are worked out. Nothing in it is hidden in a black box; only the fast inner loops (element matrices, sparse solvers, meshing) are built in.
 
 ## Start with an example
 
-The **Examples** group holds four short scripts that use the library end to end. Click one, press {{ui:Open (read-only)}}, then {{key:F5}}: each clears the view, shows a result on the canvas and a plot in the sub-displays.
+The **Examples** group holds five short scripts that use the library end to end. Click one, press {{ui:Open (read-only)}}, then {{key:F5}}: each clears the view, shows a result on the canvas and a plot in the sub-displays.
 
 | Example | What it shows |
 |---|---|
@@ -18,6 +18,7 @@ The **Examples** group holds four short scripts that use the library end to end.
 | MBB beam topology | The classic 60 × 20 topology optimization: the design forming, the compliance falling, the final layout (94 iterations, compliance 203.19) |
 | Capacitor field | Two plates 4 mm wide, 1 mm apart: potential and field, the capacitance with fringing against the ideal value and Palmer's formula |
 | Channel flow | Lattice Boltzmann flow past a post in a channel: the velocity field and the convergence history |
+| Electromagnet | A C-shaped iron core with an air gap and a coil: the flux density, the field in the gap against the magnetic-circuit formula, the inductance and the pull across the gap. Walked through in [Magnetic fields in 2-D](topic:magnetic-fields-2d) |
 
 ## Groups
 
@@ -41,7 +42,7 @@ Each function's header ends with a **check**: a small case with a known answer. 
 - the cantilever's first frequency against beam theory (0.24 % lower, as expected for a short beam) and against **Simulation**'s modal solver;
 - heat: a heated plane wall exactly, a small body cooling as the lumped-capacity formula says, a slab's temperature dying away as theory says;
 - topology optimization: `top88` reproduces the paper's 94 iterations and compliance 203.1925 (and 218.8032 with the density filter); `topopt3d` ends at the same compliance as the **Generative** workspace with the same settings;
-- a capacitor's capacitance and a long solenoid's field against their textbook values;
+- a capacitor's capacitance and a long solenoid's field against their textbook values, and the electromagnet's gap field against the magnetic-circuit formula;
 - channel flow against the exact parabolic profile.
 
 ## Read a function

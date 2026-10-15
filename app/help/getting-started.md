@@ -25,12 +25,12 @@ Everything runs in your browser, on your computer. **Nothing is uploaded.** See 
 
 - A current Chrome, Edge, Firefox or Safari with **WebGL** (3D graphics) and **WebAssembly** turned on. Both are on by default. The solid geometry is built by a WebAssembly mesh kernel that loads with the app: see [The mesh kernel](topic:solid-kernels).
 - A mouse is easiest. A trackpad works, and touch screens work for viewing and simple sketching: see [Trackpad, touch and small screens](topic:trackpad-and-touch).
-- A screen at least 1280 pixels wide shows the whole toolbar in one row. Narrower windows stack the panels.
+- A screen at least 1280 pixels wide shows the whole toolbar in one row. Narrower windows scroll the toolbar sideways; on a phone the panels open as sheets from a bar at the bottom.
 
 More about browsers: [Browsers and computers](common:browsers).
 
 :::note
-PartCraft runs in the browser today. Desktop builds are not available yet, and neither is cloud saving: you open parts from your computer and save them back to it as files.
+PartCraft runs in the browser, and on the desktop inside CadCraft Studio. Cloud saving is not available yet: you open parts from your computer and save them back to it as files.
 :::
 
 ## Open PartCraft

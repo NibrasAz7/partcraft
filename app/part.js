@@ -63,6 +63,7 @@ import { SHEET_LABELS, SHEET_BASE, SHEET_EXACT_ONLY, SHEET_DEFAULTS, sheetDeps, 
 import { readPartParams } from './params-part.js';
 import { readConfigs } from './configs.js';
 import { RIB_LABELS, RIB_BASE, RIB_EXACT_ONLY, RIB_DEFAULTS, readRib, usesRib } from './rib.js';
+import { THREAD_LABELS, THREAD_BASE, THREAD_DEFAULTS, readThread, readHoleThread, usesThread } from './threads.js';
 import { readMaterial } from './bom.js';
 import { t } from './i18n.js';
 
@@ -83,7 +84,7 @@ export const FEATURE_LABELS = Object.defineProperties({
   get chamfer() { return t('model.feature.chamfer'); },
   get shell() { return t('model.feature.shell'); },
   get import() { return t('model.feature.import'); },
-}, Object.assign({}, ...[DESIGN_LABELS, SURFACE_LABELS, BODY_LABELS, SHEET_LABELS, RIB_LABELS].map((L) => Object.getOwnPropertyDescriptors(L))));
+}, Object.assign({}, ...[DESIGN_LABELS, SURFACE_LABELS, BODY_LABELS, SHEET_LABELS, RIB_LABELS, THREAD_LABELS].map((L) => Object.getOwnPropertyDescriptors(L))));
 /** Features only the exact (OpenCascade) kernel builds. */
 export const EXACT_ONLY = new Set(['fillet', 'chamfer', 'shell', 'import', ...DESIGN_EXACT_ONLY, ...SURFACE_EXACT_ONLY, ...BODY_EXACT_ONLY, ...SHEET_EXACT_ONLY, ...RIB_EXACT_ONLY]);
 
@@ -97,7 +98,7 @@ export const indexOf = (part, id) => part.features.findIndex((f) => f.id === id)
 export const builtCount = (part) => (part.rollback === null ? part.features.length : Math.min(part.rollback, part.features.length));
 
 function nextName(part, type) {
-  const base = { sketch: 'Sketch', extrude: 'Extrude', revolve: 'Revolve', hole: 'Hole', lpattern: 'LPattern', cpattern: 'CirPattern', mirror: 'Mirror', fillet: 'Fillet', chamfer: 'Chamfer', shell: 'Shell', import: 'Imported', ...DESIGN_BASE, ...SURFACE_BASE, ...BODY_BASE, ...SHEET_BASE, ...RIB_BASE }[type];
+  const base = { sketch: 'Sketch', extrude: 'Extrude', revolve: 'Revolve', hole: 'Hole', lpattern: 'LPattern', cpattern: 'CirPattern', mirror: 'Mirror', fillet: 'Fillet', chamfer: 'Chamfer', shell: 'Shell', import: 'Imported', ...DESIGN_BASE, ...SURFACE_BASE, ...BODY_BASE, ...SHEET_BASE, ...RIB_BASE, ...THREAD_BASE }[type];
   let n = 1;
   const names = new Set(part.features.map((f) => f.name));
   while (names.has(base + n)) n++;
@@ -121,6 +122,7 @@ const DEFAULTS = {
   ...BODY_DEFAULTS,
   ...SHEET_DEFAULTS,
   ...RIB_DEFAULTS,
+  ...THREAD_DEFAULTS,
 };
 
 /** Feature ids a face name depends on (same rule as brep.js nameFeatures). */
@@ -215,7 +217,7 @@ export function deleteFeatures(part, ids) {
 }
 
 /** The version a file of this part needs: 3 with studies (a version-2 reader would drop them silently), else 2. */
-export const fileVersion = (part) => ((part.studies && Object.keys(part.studies).length) || usesDesign(part) || usesSurface(part) || usesBodies(part) || hasParamsKey(part) || usesSheet(part) || usesSheetMetal(part) || hasConfigs(part) || usesRib(part) ? 3 : 2);
+export const fileVersion = (part) => ((part.studies && Object.keys(part.studies).length) || usesDesign(part) || usesSurface(part) || usesBodies(part) || hasParamsKey(part) || usesSheet(part) || usesSheetMetal(part) || hasConfigs(part) || usesRib(part) || usesThread(part) ? 3 : 2);
 const hasConfigs = (part) => !!(part.configs && part.configs.rows && part.configs.rows.length);
 /** 0.4 P14: a material, or a drawing's sheet size, title block or revisions — a version-2 reader would drop them silently. */
 const usesSheet = (part) => !!(part.material || (part.drawing && ((part.drawing.sheet && part.drawing.sheet !== 'a3') || part.drawing.title || (part.drawing.revisions && part.drawing.revisions.length) || part.drawing.holeTable)));
@@ -323,7 +325,7 @@ export function readPart(raw) {
       case 'hole':
         g.sketch = sketchRef(); need(HOLE_KINDS.includes(f.kind), 'model.file.bad.the_hole_type');
         for (const k of ['d', 'depth', 'cboreD', 'cboreDepth']) need(num(f[k], 1e-6, 1e6), 'model.file.bad.field', { field: k });
-        Object.assign(g, { kind: f.kind, d: f.d, depth: f.depth, through: f.through === true, cboreD: f.cboreD, cboreDepth: f.cboreDepth, reverse: f.reverse === true }); readDesign(f, g, dc); break;
+        Object.assign(g, { kind: f.kind, d: f.d, depth: f.depth, through: f.through === true, cboreD: f.cboreD, cboreDepth: f.cboreDepth, reverse: f.reverse === true }); readDesign(f, g, dc); readHoleThread(f, g); break;
       case 'lpattern':
         need(Array.isArray(f.seeds) && f.seeds.every((s) => ids.has(s)), 'model.file.bad.the_features_to_pattern'); need(Number.isInteger(f.count) && f.count >= 1 && f.count <= 1000, 'model.file.bad.the_count'); need(num(f.spacing, -1e6, 1e6), 'model.file.bad.the_spacing');
         Object.assign(g, { seeds: [...f.seeds], dir: readDir(f.dir, ids), count: f.count, spacing: f.spacing, reverse: f.reverse === true }); readBodies(f, g, dc, makeReaders(dc)); break;
@@ -354,6 +356,8 @@ export function readPart(raw) {
         readSheet(f, g, dc, makeReaders(dc)); break;
       case 'rib':
         readRib(f, g, dc); break;
+      case 'thread':
+        readThread(f, g, dc, makeReaders(dc)); break;
       case 'shell':
         need(Array.isArray(f.faces) && f.faces.length <= 500, 'model.file.bad.its_face_list');
         g.faces = f.faces.map((r) => {

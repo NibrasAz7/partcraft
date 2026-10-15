@@ -1,9 +1,10 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /**
- * cs-lang-python.js — Python as a CraftScript language (registers 'python', files .py; 0.4 P10). DOM-free: script worker and
- * Node. Python itself is the vendored Pyodide (assets/vendor/pyodide/current, MPL-2.0; CPython 3.14, PSF), imported the first
- * time a Python script runs (about 13 MB; a few seconds the first time). No extra packages (no numpy): the apps fetch nothing
- * from outside.
+ * cs-lang-python.js — Python as a CraftScript language (registers 'python', files .py; 0.4 P10, 0.5 on CPython for WASI).
+ * DOM-free: script worker and Node. Python itself is CPython's own WebAssembly build (assets/vendor/cpython-wasi/current:
+ * python.wasm + python-stdlib.zip, PSF License; wasi-libc permissive; tools/partcraft-python/vendor.mjs makes the folder),
+ * fetched the first time a Python script runs (about 5 MB over the network) and run by wasi.js. No extra packages (no numpy):
+ * the apps fetch nothing from outside.
  *
  * What a Python script sees (numpy-like, 0-based):
  *   cs.<builtin>(…)          every registered builtin, the analysis library and the part's own CraftScript functions (written
@@ -21,14 +22,15 @@
  *   v.shape (tuple) v.T v.type v.numel() v.copy() v.tolist() len(v) (rows) float(v) int(v) bool(v) (one element) repr(v)
  * Every global the script makes (not a module, function, class or a name starting with _) lands in the workspace when the run
  * ends. Instruction budget: every 1000 executed lines the run checks the budget and Stop.
- * NOT a sandbox: Python in Pyodide can reach the browser's JavaScript, so a Python script can do what a web page can (the
- * network too). Imports of js, pyodide, pyodide_js, micropip and gc are refused and no JavaScript object is handed to Python,
- * but that only keeps honest scripts honest. Run only Python scripts you trust; the console says so on the first Python run.
+ * SEALED, like CraftScript and Lua: each run is a fresh CPython in its own WebAssembly instance that sees only an in-memory file
+ * tree (the standard library, /tmp) and one device, /dev/cs, through which every cs. and ws. call goes as JSON text and is
+ * answered at once (wasi.js devices). No network, no real files, no JavaScript reachable from Python.
  */
 import { registerLanguage, hasBuiltin } from './cs-runtime.js';
 import { CsError, StopError, SHARED, typeOf, valueText, tensor as mkTensor, isTensor } from './cs-values.js';
 import { binop, unop, matmul, transpose, index as tIndex, assign as tAssign, COLON } from './cs-tensor.js';
 import { vendorUrl } from './cs-lib-io.js';
+import { MemFS, Wasi, unzip } from './wasi.js';
 import { VM } from './cs-vm.js';
 import { loadLibrary } from './cs-lang-craft.js';
 import { t } from './i18n.js';
@@ -41,21 +43,28 @@ export const highlight = {
   constants: ['None', 'True', 'False'],
 };
 
-// ─────────────────────────────────────────────────────────────── Pyodide
-let py = null, loading = null, warned = false;
-/** The one Pyodide (loaded on the first Python run; the prelude runs once). */
+// ─────────────────────────────────────────────────────────────── CPython for WASI
+let py = null, loading = null;
+const NODE = typeof process !== 'undefined' && !!(process.versions && process.versions.node) && typeof window === 'undefined';
+/** The bytes of a vendored file (Node: the file; else fetched). */
+async function vendorBytes(key) {
+  const v = vendorUrl(key);
+  if (NODE && !/^(https?|blob|data):/.test(v.path)) return new Uint8Array(await process.getBuiltinModule('fs').promises.readFile(v.path));
+  const r = await fetch(v.url);
+  if (!r.ok) throw new Error(t('cs.python.err.load'));
+  return new Uint8Array(await r.arrayBuffer());
+}
+/** CPython, loaded once: the compiled module and the standard library's directory (shared by every run, read only). */
 export async function loadPython() {
   if (py) return py;
   if (!loading) loading = (async () => {
-    const m = await import(vendorUrl('pyodideJs').url);
-    const loadPyodide = m.loadPyodide || (m.default && m.default.loadPyodide);
-    if (typeof loadPyodide !== 'function') throw new Error(t('cs.python.err.load'));
-    const base = vendorUrl('pyodideJs').path.replace(/pyodide\.mjs$/, '');
-    const p = await loadPyodide({ indexURL: base, stdout: (s) => cur?.ctx.print(s + '\n'), stderr: (s) => cur?.ctx.print(s + '\n'), checkAPIVersion: true });
-    p.registerJsModule('_csjs', BRIDGE);
-    p.runPython(PRELUDE);
-    py = p;
-    return p;
+    const [wasm, stdlib] = await Promise.all([vendorBytes('cpythonWasm'), vendorBytes('cpythonStdlib')]);
+    const module = await WebAssembly.compile(wasm);
+    const tree = new MemFS();
+    for (const [name, bytes] of await unzip(stdlib)) tree.writeFile('/lib/python3.14/' + name, bytes);
+    tree.mkdirp('/lib/python3.14/lib-dynload');   // where CPython looks for extension modules (there are none)
+    py = { module, lib: tree.lookup('/lib') };
+    return py;
   })().catch((e) => { loading = null; throw e; });
   return loading;
 }
@@ -131,7 +140,7 @@ function doOp(name, A, B) {
 }
 const idxArg = (a) => (a === ':' ? COLON : dec(a));
 
-/** The functions Python reaches (module _csjs). Every argument and result is JSON text, a number or a string. */
+/** The functions Python reaches (as JSON requests on /dev/cs). Every argument and result is JSON text, a number or a string. */
 const BRIDGE = Object.freeze({
   call1: (name, args) => guard(() => out(cur.callAny(String(name), J(args).map((a) => dec(a)), 1)))(),
   calln: (name, n, args) => guard(() => { n = Math.max(1, Math.min(16, n | 0)); const r = cur.callAny(String(name), J(args).map((a) => dec(a)), n); return JSON.stringify((n > 1 ? r : [r]).map((x) => enc(x))); })(),
@@ -174,8 +183,31 @@ const BRIDGE = Object.freeze({
 
 // ─────────────────────────────────────────────────────────────── the Python side (run once at load)
 const PRELUDE = String.raw`
-import json as _json, math as _math, sys as _sys, builtins as _bi
-import _csjs as _J
+import json as _json, math as _math, sys as _sys, builtins as _bi, os as _os, traceback as _tb
+
+# the host: every call is one JSON request written to /dev/cs and its answer read back at once
+_fd = _os.open('/dev/cs', _os.O_RDWR)
+class CraftScriptError(Exception):
+    pass
+class _Stopped(BaseException):
+    pass
+def _rpc(*a):
+    _os.write(_fd, _json.dumps(a).encode())
+    parts = []
+    while True:
+        b = _os.read(_fd, 1 << 20)
+        if not b: break
+        parts.append(b)
+    r = _json.loads(b''.join(parts))
+    if 'e' in r:
+        if r.get('stop'): raise _Stopped(r['e'])
+        raise CraftScriptError(r['e'])
+    return r.get('r')
+class _Host:
+    def __getattr__(self, name):
+        def f(*a): return _rpc(name, *a)
+        return f
+_J = _Host()
 
 def _enc(x, d=0):
     if d > 32: raise ValueError('value nested too deeply for CraftScript')
@@ -311,13 +343,6 @@ ws = _WS()
 def ws_names(): return _json.loads(_J.wsnames())
 def display(cmd): cs.display(cmd)
 
-_BLOCKED = ('js', 'pyodide', 'pyodide_js', '_pyodide', 'micropip', 'gc', '_csjs')
-class _Block:
-    @classmethod
-    def find_spec(cls, name, path=None, target=None):
-        if name.split('.')[0] in _BLOCKED: raise ImportError('Python scripts here cannot import ' + name)
-        return None
-
 def _run(src, file, ns):
     code = compile(src, file, 'exec')
     count = [0]
@@ -346,21 +371,35 @@ def _fresh(names):
         except Exception: pass
     return ns
 
-for _m in list(_sys.modules):
-    if _m.split('.')[0] in _BLOCKED and _m != '_csjs': del _sys.modules[_m]
-_sys.meta_path.insert(0, _Block)
+def _main():
+    job = _rpc('job')
+    ns = _fresh(job['names'])
+    before = set(job['own'])
+    try:
+        _run(job['src'], job['file'], ns)
+    except _Stopped:
+        raise
+    except SystemExit:
+        pass
+    except BaseException as e:
+        _keep(ns, before)
+        _rpc('error', ''.join(_tb.format_exception(e)))
+        return
+    _keep(ns, before)
+
+_main()
 `;
 const PY_OWN = new Set(['cs', 'ws', 'ws_names', 'display', 'Value']);
 
-/** A Python error (PythonError's traceback) → { message, line } for the script's own file. */
+/** A Python traceback (text) → { message, line } for the script's own file. */
 export function pyError(e, file) {
   const text = e && e.message ? String(e.message) : String(e);
   const esc = (file || 'script').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   let line = null;
   for (const m of text.matchAll(new RegExp('File "' + esc + '", line (\\d+)', 'g'))) line = +m[1];
   const last = text.trim().split('\n').filter((l) => l.trim()).pop() || text;
-  // an error raised in CraftScript comes back wrapped (JsException: CsError: …): keep its words; Python's own keep their names
-  const msg = /^(?:pyodide\.ffi\.)?JsException:/.test(last) ? last.replace(/^(?:pyodide\.ffi\.)?JsException:\s*(?:\w*Error:\s*)?/, '').trim() : last.trim();
+  // an error raised in CraftScript keeps its words; Python's own keep their names (ZeroDivisionError: …)
+  const msg = /^(?:__main__\.)?CraftScriptError:/.test(last) ? last.replace(/^(?:__main__\.)?CraftScriptError:\s*/, '').trim() : last.trim();
   return { message: msg, line, col: null };
 }
 
@@ -368,7 +407,7 @@ export const adapter = {
   id: 'python',
   highlight,
   async run(source, { ws, call, ctx }) {
-    const p = await loadPython();
+    const P = await loadPython();
     const file = ctx.file || 'script.py';
     // library functions the script names (cs.name( / cs.call('name')) that are not builtins, as in Lua (0.4 P8)
     const wanted = new Set([...String(source).matchAll(/\bcs\s*\.\s*([A-Za-z_]\w*)\s*\(/g)].map((m) => m[1]).filter((n) => !['call', 'tensor', 'struct', 'cell', 'display'].includes(n)));
@@ -385,26 +424,46 @@ export const adapter = {
       }
     };
     const callAny = (name, args, n) => (libNames.has(name) ? (n > 1 ? callLib(name, args, n) : callLib(name, args, 1)[0]) : call(name, args, n));
-    if (!warned) { warned = true; ctx.print(t('cs.python.trust') + '\n'); }
     cur = { ws, call, ctx, callAny, handles: new Map(), seq: 0, stopped: null, vars: [] };
-    const G = p.globals;
-    let ns = null;
+    // the run's own file tree: the shared (read-only) standard library, /tmp, the program, the host device
+    const fs = new MemFS();
+    fs.root.entries.set('lib', P.lib);
+    fs.mkdirp('/tmp');
+    fs.writeFile('/run/main.py', PRELUDE);
+    let answer = new Uint8Array(0), error = null;
+    const job = { src: String(source), file, names: ws.names().filter((k) => !PY_OWN.has(k)), own: [...PY_OWN, '__name__', '__builtins__'] };
+    const enc = new TextEncoder(), decIn = new TextDecoder();
+    fs.device('/dev/cs', {
+      write(bytes) {
+        let reply;
+        try {
+          const [name, ...args] = JSON.parse(decIn.decode(bytes));
+          if (name === 'job') reply = { r: job };
+          else if (name === 'error') { error = String(args[0] || ''); reply = { r: null }; }
+          else if (Object.hasOwn(BRIDGE, name)) reply = { r: BRIDGE[name](...args) ?? null };
+          else reply = { e: t('cs.python.err.host', { name: String(name).slice(0, 40) }) };
+        } catch (e) {
+          reply = { e: e && e.message ? e.message : String(e), ...(e instanceof StopError ? { stop: true } : {}) };
+        }
+        answer = enc.encode(JSON.stringify(reply));
+      },
+      read(max) { const out = answer.subarray(0, max); answer = answer.subarray(out.length); return out; },
+    });
+    const outDec = new TextDecoder(), errDec = new TextDecoder();
+    const w = new Wasi({
+      args: ['python', '-I', '-B', '-u', '-X', 'utf8', '/run/main.py'], fs,
+      stdout: (b) => ctx.print(outDec.decode(b, { stream: true })), stderr: (b) => ctx.print(errDec.decode(b, { stream: true })),
+    });
     try {
-      const names = ws.names().filter((k) => !PY_OWN.has(k));
-      ns = G.get('_fresh')(p.toPy(names));
-      const before = p.toPy([...PY_OWN, '__name__', '__builtins__']);
-      let error = null;
-      try { G.get('_run')(String(source), file, ns); } catch (e) { error = e; }
+      const inst = await WebAssembly.instantiate(P.module, { wasi_snapshot_preview1: w.imports });
+      try { w.start(inst); } catch (e) { if (!cur.stopped) error = error || (e && e.message ? e.message : String(e)); }
       if (cur.stopped) return { ok: false, error: { message: cur.stopped.message, line: null, col: null, file: ctx.file || null, stopped: true }, vars: [] };
       // globals → workspace (changed or new), even after an error: what was computed is kept
-      try { G.get('_keep')(ns, before); } catch { /* nothing to keep */ }
-      before.destroy?.();
       const vars = [];
       for (const [k, v] of cur.vars) { if (v !== undefined && NAME_RE.test(k) && v !== ws.get(k)) { ws.set(k, v); vars.push(k); } }
       if (error) return { ok: false, error: { ...pyError(error, file), file: ctx.file || null }, vars };
       return { ok: true, vars };
     } finally {
-      try { ns?.destroy?.(); } catch { /* gone */ }
       cur = null;
     }
   },

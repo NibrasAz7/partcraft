@@ -36,6 +36,7 @@ import { installSurface, sheetMeshes } from './surface.js';
 import { installBodies } from './brep-bodies.js';
 import { installSheet } from './brep-sheet.js';
 import { installRib } from './brep-rib.js';
+import { installThread } from './brep-thread.js';
 import { exactSurface } from './brep-surf.js';   // exact surfaces for the tet mesher (rec.surf)
 import { t as tr } from './i18n.js';
 
@@ -586,11 +587,12 @@ const FEATURES = {
       tools.push({ shape: T(mk.Shape()), op: 'cut', names });
       axes.push({ o: P0, d: V.mul(frame.n, -sign) });
       // the thread is cosmetic: drawn as the major diameter over the tap drill, and noted (ISO 261 / ISO 2306)
-      if (thread) threads.push({ o: P0, d: din, r: thread[0] / 2, depth: f.threadDepth || (f.through ? depth - 1 : depth) });
+      if (thread) threads.push({ o: P0, d: din, r: thread[0] / 2, depth: f.threadDepth || (f.through ? depth - 1 : depth), r0: Math.min(thread[2], thread[0] - 1.082532 * thread[1]) / 2, r1: thread[0] / 2 });
     }
     if (threads.length) ctx.threads.set(f.id, { callout: threadCallout(f), list: threads });
     ctx.holeAxes.set(f.id, axes);
-    return { tools, count: pts.length };
+    // a modelled thread (0.5 WL.29) is the mesh kernel's: here it stays cosmetic, and says so
+    return { tools, count: pts.length, ...(thread && f.modelled ? { warning: tr('thread.warn.exact') } : {}) };
   },
 
   lpattern(f, ctx) {
@@ -678,6 +680,8 @@ installBodies(FEATURES, LIB);
 installSheet(FEATURES, LIB);
 // the rib (brep-rib.js, 0.4 P20)
 installRib(FEATURES, LIB);
+// threads on round faces (brep-thread.js, 0.5 WL.29): cosmetic on this kernel
+installThread(FEATURES, LIB);
 
 /** Z-up (STEP, STL, 3MF) → PartCraft's Y-up: (x, y, z) → (x, z, −y); column-major. */
 export const Z_TO_Y = [1, 0, 0, 0, 0, 0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 1];
@@ -851,6 +855,9 @@ function faceTableOf(ctx) {
       rec.type = 'cylinder';
       rec.axis = { o: H.xyz(T(ax.Location())), d: H.xyz(T(ax.Direction())) };
       rec.r = cy.Radius();
+      rec.v = [ad.FirstVParameter(), ad.LastVParameter()];   // its extent along the axis (threads.js)
+      // material inside it: a shaft. The surface's normal points away from the axis when its frame is right-handed
+      rec.outside = T(cy.Position()).Direct() !== rev;
     } else if (type === 'GeomAbs_Cone') rec.type = 'cone';   // gp_Cone is not bound in this build
     else if (type === 'GeomAbs_Sphere') rec.type = 'sphere';
     else if (type === 'GeomAbs_Torus') rec.type = 'torus';

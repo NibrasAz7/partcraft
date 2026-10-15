@@ -27,7 +27,12 @@
  * solved — it is checked and reported with how far off it is.
  *
  *   placeAll(asm, builds)  builds: Map(pid → kernel regenerate() result) → { world: Map(inst → mat4), problems: [...] }
- *   interference(asm, builds, world, M) → [{ a, b, volume }]   overlapping volume per pair (manifold-3d)
+ *   interference(asm, builds, world, M, { touch }) → [{ a, b, volume, kind }]   per pair (manifold-3d), kind (0.5 WL.33):
+ *              'overlap' (a real clash) · 'thread' (all of it inside both parts' cosmetic thread zones: a bolt in a tapped hole)
+ *              · 'thread-depth' (inside one part's thread zone only: one thread runs deeper than the other) · 'touch'
+ *              (no volume, faces in contact within touchTol; only with touch: true)
+ *   filterClashes(asm, list) → { shown, hidden }   asm.clashFilter = { hide: [kinds], pairs: [[inst a, inst b] sorted] }
+ *              (written only when it holds something; such a file is version 4)
  *   jointTree(asm, builds, world) → [{ joint, parent, child, normal }]   the joints placement walked, parents first
  *   freeIds(asm) → Set of instances no joint path ties to the grounded part (only these move by hand)
  *   movePlace(place, { move?: [dx,dy,dz], rotate?: { axis: [x,y,z], angle (deg), about: [x,y,z] } }) → new place
@@ -41,7 +46,7 @@ import { readViews } from './explode.js';
 import { t } from './i18n.js';
 
 export const FORMAT = 'partcraft-assembly';
-export const VERSION = 3;
+export const VERSION = 4;   // 4: interference filters (0.5 WL.33); 3: 0.4's joints
 export const JOINT_TYPES = { rigid: 'Rigid', revolute: 'Revolute', slider: 'Slider', cylindrical: 'Cylindrical', planar: 'Planar', ball: 'Ball', pinslot: 'PinSlot' };
 /** The values a joint lets move (its degrees of freedom), first = the one a motion check sweeps by default. */
 export const JOINT_DOF = { rigid: [], revolute: ['angle'], slider: ['offset'], cylindrical: ['angle', 'offset'], planar: ['dx', 'dy', 'angle'], ball: ['angle', 'tiltX', 'tiltY'], pinslot: ['slide', 'angle'] };
@@ -84,6 +89,7 @@ export function removeInstance(asm, id) {
   asm.instances = asm.instances.filter((i) => i.id !== id);
   asm.joints = asm.joints.filter((j) => j.a.inst !== id && j.b.inst !== id);
   for (const v of asm.views || []) v.steps = v.steps.map((s) => ({ ...s, insts: s.insts.filter((i) => i !== id) })).filter((s) => s.insts.length);
+  if (asm.clashFilter) { asm.clashFilter.pairs = asm.clashFilter.pairs.filter((pr) => !pr.includes(id)); tidyFilter(asm); }
   const used = new Set(asm.instances.map((i) => i.part));
   for (const pid of Object.keys(asm.parts)) if (!used.has(pid)) delete asm.parts[pid];
 }
@@ -263,8 +269,14 @@ export function moveInstance(asm, id, place) {
   i.place = [...place];
 }
 
-/** Pairwise overlap volumes of the placed instances (manifold-3d intersection). */
-export function interference(asm, builds, world, M, { tol = 1e-6 } = {}) {
+/**
+ * Pairwise interference of the placed instances (manifold-3d intersection), each result with its kind (0.5 WL.33). A part's
+ * cosmetic threads (tapped holes, Thread features not modelled: regen.threads) are modelled as plain cylinders at the major or
+ * tap-drill size, so a bolt in a tapped hole overlaps; such an overlap is classified by the thread zones (tubes from the minor
+ * to the major radius along each thread, in world space): inside both parts' zones = 'thread' (a threaded fit), inside one
+ * part's only = 'thread-depth', else 'overlap'. touch: also pairs with no common volume whose faces are within touchTol.
+ */
+export function interference(asm, builds, world, M, { tol = 1e-6, touch = false, touchTol = 1e-3 } = {}) {
   const live = [];
   const T = (m) => { live.push(m); return m; };
   const solids = [];
@@ -275,19 +287,90 @@ export function interference(asm, builds, world, M, { tol = 1e-6 } = {}) {
       const mesh = new M.Mesh({ numProp: 3, vertProperties: new Float32Array(b.mesh.positions), triVerts: new Uint32Array(b.mesh.indices) });
       mesh.merge();
       const m = T(new M.Manifold(mesh));
-      solids.push({ id: i.id, m: T(m.transform(world.get(i.id))) });
+      solids.push({ id: i.id, m: T(m.transform(world.get(i.id))), zones: undefined, b, W: world.get(i.id) });
     }
+    // an instance's cosmetic thread zones, made once and only when an overlap needs them
+    const zonesOf = (sd) => {
+      if (sd.zones !== undefined) return sd.zones;
+      const tubes = [];
+      for (const th of sd.b.threads?.values?.() || []) {
+        if (th.modelled) continue;
+        for (const z of th.list || []) {
+          if (!(z.r1 > 0) || !(z.depth > 0)) continue;
+          const r0 = Math.max(0, (z.r0 ?? z.r1 * 0.8) * 0.97), r1 = z.r1 * 1.03 + 1e-3, m = Math.max(0.05 * z.r1, 1e-3), d = V.norm(z.d);
+          const x = V.norm(Math.abs(d[0]) < 0.9 ? V.cross(d, [1, 0, 0]) : V.cross(d, [0, 1, 0])), y = V.cross(d, x);
+          const ring = T(T(M.CrossSection.circle(r1, 48)).subtract(T(M.CrossSection.circle(r0, 48))));
+          const tube = T(T(ring.extrude(z.depth + 2 * m)).translate([0, 0, -m]));
+          tubes.push(T(T(tube.transform(V.basisMatrix(x, y, d, z.o))).transform(sd.W)));
+        }
+      }
+      sd.zones = tubes.length ? (tubes.length === 1 ? tubes[0] : T(M.Manifold.union(tubes))) : null;
+      return sd.zones;
+    };
     const out = [];
     for (let x = 0; x < solids.length; x++) for (let y = x + 1; y < solids.length; y++) {
-      const a = solids[x].m.boundingBox(), b = solids[y].m.boundingBox();
-      if ([0, 1, 2].some((k) => a.max[k] < b.min[k] - tol || b.max[k] < a.min[k] - tol)) continue;
-      const v = T(solids[x].m.intersect(solids[y].m)).volume();
-      if (v > tol) out.push({ a: solids[x].id, b: solids[y].id, volume: v });
+      const A = solids[x], B = solids[y], a = A.m.boundingBox(), b = B.m.boundingBox(), pad = touch ? touchTol : 0;
+      if ([0, 1, 2].some((k) => a.max[k] < b.min[k] - tol - pad || b.max[k] < a.min[k] - tol - pad)) continue;
+      const common = T(A.m.intersect(B.m)), v = common.volume();
+      if (v > tol) {
+        const za = zonesOf(A), zb = zonesOf(B), small = Math.max(tol, 1e-4 * v);
+        let kind = 'overlap';
+        if (za || zb) {
+          const any = za && zb ? T(za.add(zb)) : za || zb;
+          if (T(common.subtract(any)).volume() <= small) kind = za && zb && T(common.subtract(T(za.intersect(zb)))).volume() <= small ? 'thread' : 'thread-depth';
+        }
+        out.push({ a: A.id, b: B.id, volume: v, kind });
+      } else if (touch && A.m.minGap(B.m, touchTol) <= touchTol) out.push({ a: A.id, b: B.id, volume: 0, kind: 'touch' });
     }
     return out;
   } finally {
     for (const m of live) { try { m.delete(); } catch { /* gone */ } }
   }
+}
+
+/** The kinds of interference results, in the order they are listed. */
+export const CLASH_KINDS = ['overlap', 'thread-depth', 'thread', 'touch'];
+const pairKey = (a, b) => (a < b ? a + '|' + b : b + '|' + a);
+/** The results the assembly's filters leave shown, and the ones they hide. */
+export function filterClashes(asm, list) {
+  const f = asm.clashFilter, hide = new Set(f?.hide || []), pairs = new Set((f?.pairs || []).map(([a, b]) => pairKey(a, b)));
+  const shown = [], hidden = [];
+  for (const c of list || []) (hide.has(c.kind) || pairs.has(pairKey(c.a, c.b)) ? hidden : shown).push(c);
+  return { shown, hidden };
+}
+/** Show or hide a kind (one edit; the caller makes it an undo step). */
+export function setKindHidden(asm, kind, hidden) {
+  if (!CLASH_KINDS.includes(kind)) return;
+  const f = asm.clashFilter || (asm.clashFilter = { hide: [], pairs: [] });
+  f.hide = f.hide.filter((k) => k !== kind);
+  if (hidden) f.hide.push(kind);
+  f.hide.sort((x, y) => CLASH_KINDS.indexOf(x) - CLASH_KINDS.indexOf(y));
+  tidyFilter(asm);
+}
+/** Hide (or show again) one pair of instances. */
+export function setPairHidden(asm, a, b, hidden) {
+  const f = asm.clashFilter || (asm.clashFilter = { hide: [], pairs: [] });
+  const k = pairKey(a, b);
+  f.pairs = f.pairs.filter(([x, y]) => pairKey(x, y) !== k);
+  if (hidden) f.pairs.push(a < b ? [a, b] : [b, a]);
+  tidyFilter(asm);
+}
+function tidyFilter(asm) { if (asm.clashFilter && !asm.clashFilter.hide.length && !asm.clashFilter.pairs.length) delete asm.clashFilter; }
+/** Untrusted filters from a file, against the assembly's instances (pairs of instances it no longer has are dropped). */
+export function readClashFilter(raw, insts) {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== 'object' || Array.isArray(raw) || !Array.isArray(raw.hide ?? []) || !Array.isArray(raw.pairs ?? []) || (raw.pairs || []).length > 5000) throw new Error(t('asm.clash.err_filter'));
+  const hide = [...new Set(raw.hide || [])];
+  if (!hide.every((k) => CLASH_KINDS.includes(k))) throw new Error(t('asm.clash.err_filter'));
+  const pairs = [], seen = new Set();
+  for (const pr of raw.pairs || []) {
+    if (!Array.isArray(pr) || pr.length !== 2 || !pr.every((x) => typeof x === 'string' && /^i\d{1,9}$/.test(x)) || pr[0] === pr[1]) throw new Error(t('asm.clash.err_filter'));
+    const k = pairKey(pr[0], pr[1]);
+    if (!insts.has(pr[0]) || !insts.has(pr[1]) || seen.has(k)) continue;
+    seen.add(k); pairs.push(pr[0] < pr[1] ? [pr[0], pr[1]] : [pr[1], pr[0]]);
+  }
+  hide.sort((x, y) => CLASH_KINDS.indexOf(x) - CLASH_KINDS.indexOf(y));
+  return hide.length || pairs.length ? { hide, pairs } : null;
 }
 
 /** Step a joint through its range and report interference at each step. → [{ value, pairs }] */
@@ -366,6 +449,8 @@ export function readAssembly(raw) {
     asm.joints.push(jj);
   }
   asm.views = readViews(j.views, insts, take);
+  const cf = readClashFilter(j.clashFilter, insts);
+  if (cf) asm.clashFilter = cf;
   asm.seq = maxN + 1;
   asm.version = fileVersion(asm);   // what its contents need (and what it is written as)
   return asm;
@@ -395,6 +480,6 @@ export function readLimits(L, type) {
 /** readLimits that answers null instead of throwing (limits that no longer fit a joint's new type). */
 export function readLimitsSafe(L, type) { try { return readLimits(L, type); } catch { return null; } }
 
-/** 3 when a joint is of a 0.4 type or limits a value per name; else 2 (readers of version 2 open it). */
-export const fileVersion = (asm) => (asm.joints.some((j) => NEW_TYPES.has(j.type) || (j.limits && typeof j.limits.min !== 'number') || EXTRA_VALUES.some((k) => j[k] !== undefined && j[k] !== 0)) ? 3 : 2);
+/** 4 with interference filters (0.5 WL.33); 3 when a joint is of a 0.4 type or limits a value per name; else 2 (readers of version 2 open it). */
+export const fileVersion = (asm) => (asm.clashFilter ? 4 : asm.joints.some((j) => NEW_TYPES.has(j.type) || (j.limits && typeof j.limits.min !== 'number') || EXTRA_VALUES.some((k) => j[k] !== undefined && j[k] !== 0)) ? 3 : 2);
 export const toJSON = (asm) => JSON.stringify({ ...asm, version: fileVersion(asm) }, null, 1);

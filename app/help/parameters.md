@@ -3,7 +3,7 @@ title: Drive a part with parameters
 summary: Name the sizes that matter (width, thickness, bolt size), link any feature number or sketch dimension to them with =, and change the whole part from one table.
 section: tasks
 order: 102
-keywords: parameters, global variables, variables, equations, design intent, driving dimensions, link, expression, formula, name a dimension, linked values
+keywords: parameters, where used, used by, global variables, variables, equations, design intent, driving dimensions, link, expression, formula, name a dimension, linked values
 ---
 
 A parameter is a named number, such as `width = 120` or `margin = bolt * 1.5`. Link a depth, a hole diameter, a pattern count or a sketch dimension to it, and changing the parameter changes all of them in one step. This is how you keep design intent in the part instead of in your head.
@@ -31,6 +31,16 @@ Numbers you can link: extrude depth, revolve angle, hole diameter, depth and cou
 On the {{ui:Parameters}} tab, type a new value or expression in the **Expression** column and press {{key:Enter}}. Everything linked to it changes and the part rebuilds, as one step: {{key:Mod+Z}} undoes it.
 
 To change a number from the other end, see [Equations both ways](topic:equations-two-way).
+
+## See where a parameter is used
+
+Under each parameter on the {{ui:Parameters}} tab, a line says what uses it:
+
+- the numbers it drives, such as **Extrude1 depth** or **Sketch1 D2 (distance)**. Click one to select its feature and show its properties;
+- the numbers it drives **through** other parameters, such as **Hole1 diameter (through h, d)** when `d = h + 2` and `h = w / 2`;
+- the **parameters** whose expressions use it, the **configurations** that set it, and the **scripts** that read it (see [Write and run scripts](topic:craftscript)).
+
+"Not used yet." means nothing uses it: you can delete it without asking.
 
 ## Unlink, rename, delete
 

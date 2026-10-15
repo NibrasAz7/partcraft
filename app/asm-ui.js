@@ -6,13 +6,16 @@
  * The logic lives in assembly.js, bom.js, explode.js, asm-drawing.js and measure-brep.js (Node-tested).
  *
  *   createAsmTools(ctx) → { instSections(inst), jointSections(joint), rootSections(), displayWorld(world), afterShow(),
- *     pick(hit) → bool (true when a tool took the click), keydown(ev) → bool, exportCmd(cmd), reset(), state }
+ *     pick(hit) → bool (true when a tool took the click), keydown(ev) → bool, exportCmd(cmd), printMesh(), reset(), state }
  * Exploded state (which view, slider position) is page state: it changes only what is drawn and what the drawing
  * shows, never joints or `place`.
  */
 import { t } from './i18n.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import * as BOM from './bom.js';
+import { assemblyIfc } from './ifc-export.js';
+import { evaluateVars } from './params.js';
+import { readPart } from './part.js';
 import * as EX from './explode.js';
 import { assemblySheet, assemblyMesh, assembly3mf, balloonsFor } from './asm-drawing.js';
 import { exactWhy } from './exact-client.js';
@@ -317,6 +320,13 @@ export function createAsmTools(ctx) {
       ctx.status(t('ui.asm.export.bom', { file: name + ' - BOM.csv', n: Object.keys(a.parts).length }));
       return;
     }
+    if (cmd === 'export-ifc') {
+      // IFC4 with every property: a type per part (its properties), an occurrence per instance (its values; 0.5 WL.32)
+      const r = assemblyIfc(a, ctx.builds, world, { evaluate: evaluateVars, readPart, bom: BOM.bomRows(a, ctx.builds), fileName: name + '.ifc' });
+      ctx.download(r.text, name + '.ifc', 'application/x-step');
+      ctx.status(t('ui.asm.export.ifc', { file: name + '.ifc', parts: Object.keys(a.parts).length, n: a.instances.length, props: r.counts.properties }));
+      return;
+    }
     if (cmd === 'export-stl') {
       const m = assemblyMesh(a.instances.map((i) => ({ mesh: ctx.builds.get(i.part).mesh, matrix: world.get(i.id) })));
       ctx.download(ctx.X.stlBinary(m, name), name + '.stl', 'model/stl');
@@ -356,5 +366,11 @@ export function createAsmTools(ctx) {
     }
   }
 
-  return { instSections, jointSections, rootSections, displayWorld, afterShow, pick, keydown, exportCmd, reset, stopGizmo, state: st, get gizmo() { return st.gizmo; } };
+  /** The whole assembly as one mesh (model space, Y up, mm) for the 3D-printing check (0.5 SG.4), or null while parts build. */
+  function printMesh() {
+    const a = asm(), world = ctx.place?.world;
+    if (!world || a.instances.some((i) => !ctx.builds.get(i.part)?.mesh)) return null;
+    return assemblyMesh(a.instances.map((i) => ({ mesh: ctx.builds.get(i.part).mesh, matrix: world.get(i.id) })));
+  }
+  return { instSections, jointSections, rootSections, displayWorld, afterShow, pick, keydown, exportCmd, printMesh, reset, stopGizmo, state: st, get gizmo() { return st.gizmo; } };
 }

@@ -89,9 +89,11 @@ addOps({
       if (NAME_RE.test(base)) userFiles.set(base, { source: f.text, file: String(f.name), lang: f.lang === 'lua' ? 'lua' : 'craft' });
     }
     if (typeof args.libBase === 'string' && /^(https?:|blob:|file:)/.test(args.libBase)) libBase = args.libBase.endsWith('/') ? args.libBase : args.libBase + '/';
+    // the part's parameters (plain numbers by name; param() / params(), 0.5 WL.30) come with every run
+    const params = () => (args.params && typeof args.params === 'object' && !Array.isArray(args.params) ? args.params : {});
     if (args.part !== undefined || args.bodies !== undefined) {
-      IO.setIoHost({ ...fsHost, part: () => (args.part ? readValue(args.part) : null), bodies: () => (Array.isArray(args.bodies) ? args.bodies.map(readValue) : []) });
-    } else IO.setIoHost(fsHost);
+      IO.setIoHost({ ...fsHost, part: () => (args.part ? readValue(args.part) : null), bodies: () => (Array.isArray(args.bodies) ? args.bodies.map(readValue) : []), params });
+    } else IO.setIoHost({ ...fsHost, params });
     current = ctx;
     try {
       return await rt.run(source, { lang: typeof args.lang === 'string' ? args.lang : 'craft', file: typeof args.file === 'string' ? args.file.slice(0, 200) : null });

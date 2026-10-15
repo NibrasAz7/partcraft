@@ -7,7 +7,9 @@
  *   const pp = mountParams(host)   host = { root, part(), commit(label, fn) (one undo step + rebuild + render),
  *                                          status(msg, keep?), ask({ title, text, buttons }), download(text, name, type),
  *                                          openText(text, name), mode(), fileBase() }
- *   pp.render()                     the panel (call from renderAll); also drops equations whose numbers were deleted
+ *   pp.render()                     the panel (call from renderAll); also drops equations whose numbers were deleted; under
+ *                                   each parameter, where it is used (params-uses.js; 0.5 WL.30): a feature's use selects it
+ *                                   through host.selectFeature(id) when the host has one
  *   pp.numInput(value, onchange, { min, max, step }, key)
  *                                   a number field for target `key` (params-part.js): a plain number in an unlinked field
  *                                   calls onchange(v) as before; "=expr" (or any expression) links it; a plain number in
@@ -23,6 +25,7 @@ import * as PP from './params-part.js';
 import { literal, formatNumber } from './expr.js';
 import { partToScript, scriptToPart, ScriptError } from './script.js';
 import * as CF from './configs.js';
+import { paramUses, usesCount } from './params-uses.js';
 import { t } from './i18n.js';
 
 const fmt = (v) => (v === null || v === undefined ? '' : formatNumber(v));
@@ -30,17 +33,21 @@ let uid = 0;
 
 export function mountParams(host) {
   const panel = host.root.querySelector('[data-params]');
-  const tabs = [...host.root.querySelectorAll('[data-right-tabs] [role="tab"]')];
+  // the tabs are read live: an add-on may add its own (ui.panelTab, 0.5 AO.7)
+  // the tab strip kept at start: it travels with the right panel into the pop-out panels window (another document)
+  const strip = host.root.querySelector('[data-right-tabs]');
+  const allTabs = () => (strip ? [...strip.querySelectorAll('[role="tab"]')] : []);
+  const tabs = allTabs();
   let lastLabels = new Map(); // key → label, for saying which equations went with deleted numbers
 
   // ---------------------------------------------------------------- tabs (Properties | Parameters)
   function showTab(name, focus = false) {
-    for (const tb of tabs) {
+    for (const tb of allTabs()) {
       const on = tb.dataset.tab === name;
       tb.setAttribute('aria-selected', String(on));
       tb.tabIndex = on ? 0 : -1;
-      const sec = host.root.querySelector('#' + tb.getAttribute('aria-controls'));
-      if (sec) sec.hidden = !on;
+      const sec = tb.ownerDocument.getElementById(tb.getAttribute('aria-controls')) || host.root.querySelector('#' + tb.getAttribute('aria-controls'));
+      if (sec) { const was = sec.hidden; sec.hidden = !on; if (on && was && sec.dataset.addon !== undefined) sec.dispatchEvent(new CustomEvent('cc-tab-shown')); }
       if (on && focus) tb.focus();
     }
     if (name === 'params') render();
@@ -48,9 +55,9 @@ export function mountParams(host) {
   for (const tb of tabs) {
     tb.addEventListener('click', () => showTab(tb.dataset.tab));
     tb.addEventListener('keydown', (e) => {
-      const i = tabs.indexOf(tb);
-      const j = e.key === 'ArrowRight' ? (i + 1) % tabs.length : e.key === 'ArrowLeft' ? (i + tabs.length - 1) % tabs.length : e.key === 'Home' ? 0 : e.key === 'End' ? tabs.length - 1 : -1;
-      if (j >= 0) { e.preventDefault(); e.stopPropagation(); showTab(tabs[j].dataset.tab, true); }
+      const vis = allTabs().filter((x) => !x.hidden), i = vis.indexOf(tb);   // a hidden tab (Script outside Design) is skipped
+      const j = e.key === 'ArrowRight' ? (i + 1) % vis.length : e.key === 'ArrowLeft' ? (i + vis.length - 1) % vis.length : e.key === 'Home' ? 0 : e.key === 'End' ? vis.length - 1 : -1;
+      if (j >= 0) { e.preventDefault(); e.stopPropagation(); showTab(vis[j].dataset.tab, true); }
     });
   }
   const visible = () => panel && !panel.closest('[role="tabpanel"]')?.hidden;
@@ -121,7 +128,8 @@ export function mountParams(host) {
         if (lab) lab.append(' ', fx);
       });
     }
-    inp.addEventListener('keydown', (e) => { if (e.key === 'Escape') { inp.value = show(value); inp.blur(); } });
+    // Esc keeps the old number; Enter sets the typed one (leaving the box fires its change)
+    inp.addEventListener('keydown', (e) => { if (e.key === 'Escape') { inp.value = show(value); inp.blur(); } else if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); inp.blur(); } });
     inp.addEventListener('change', () => typed(key, inp.value, value, onchange, { min, max }).then((ok) => { if (!ok && inp.isConnected) inp.value = show(value); }));
     return inp;
   }
@@ -324,8 +332,24 @@ export function mountParams(host) {
     const out = [];
     out.push(el('p', { className: 'pc-note', style: 'margin-top:0' }, t('ui.params.intro')));
 
-    // variables
-    const vrows = rep.vars.map((v) => {
+    // variables, each with where it is used
+    const uses = paramUses(part);
+    const usedRow = (name) => {
+      const u = uses.get(name), items = [];
+      const featureBtn = (x, text) => (x.feature && host.selectFeature
+        ? el('button', { type: 'button', className: 'pc-linkbtn', onclick: () => host.selectFeature(x.feature), dataset: { useTarget: x.target } }, text)
+        : el('span', { dataset: { useTarget: x.target } }, text));
+      for (const x of u?.direct || []) items.push(featureBtn(x, x.label));
+      for (const x of u?.via || []) items.push(featureBtn(x, t('ui.params.uses.via', { label: x.label, through: x.through.join(', ') })));
+      for (const n of u?.vars || []) items.push(el('span', { dataset: { useVar: n } }, t('ui.params.uses.var', { name: n })));
+      for (const c of u?.configs || []) items.push(el('span', { dataset: { useConfig: c } }, t('ui.params.uses.config', { name: c })));
+      for (const sc of u?.scripts || []) items.push(el('span', { dataset: { useScript: sc.name } }, t(sc.all ? 'ui.params.uses.script_all' : 'ui.params.uses.script', { name: sc.name })));
+      const list = [];
+      items.forEach((it, i) => { if (i) list.push('; '); list.push(it); });
+      return el('tr', { className: 'pc-puses', dataset: { usesOf: name, uses: String(usesCount(u)) } },
+        el('td', { colSpan: 5 }, el('span', { className: 'pc-muted' }, usesCount(u) ? t('ui.params.uses.by') + ' ' : t('ui.params.uses.none')), ...list));
+    };
+    const vrows = rep.vars.flatMap((v) => {
       const name = el('input', { type: 'text', className: 'pc-input', value: v.name, maxLength: 40, 'aria-label': t('ui.params.var.name_of', { name: v.name }), spellcheck: false });
       name.addEventListener('change', () => { const n = name.value.trim(); if (n && n !== v.name) setVarFrom(v.name, { rename: n }); else name.value = v.name; });
       const expr = el('input', { type: 'text', className: 'pc-input', value: v.expr, 'aria-label': t('ui.params.var.expr_of', { name: v.name }), spellcheck: false });
@@ -338,9 +362,10 @@ export function mountParams(host) {
       });
       const note = el('input', { type: 'text', className: 'pc-input', value: v.note, maxLength: 200, 'aria-label': t('ui.params.var.note_on', { name: v.name }), placeholder: t('ui.params.col.note') });
       note.addEventListener('change', () => setVarFrom(v.name, { note: note.value }));
-      return el('tr', { className: v.error ? 'is-error' : '', dataset: { var: v.name } },
+      return [el('tr', { className: v.error ? 'is-error' : '', dataset: { var: v.name } },
         el('td', {}, name), el('td', {}, expr), el('td', {}, val, v.error ? el('div', { className: 'pc-perr' }, v.error) : null), el('td', {}, note),
-        el('td', {}, el('button', { type: 'button', className: 'pc-btn pc-btn-sm is-danger', title: t('ui.params.var.delete', { name: v.name }), 'aria-label': t('ui.params.var.delete', { name: v.name }), onclick: () => deleteVar(v.name) }, '×')));
+        el('td', {}, el('button', { type: 'button', className: 'pc-btn pc-btn-sm is-danger', title: t('ui.params.var.delete', { name: v.name }), 'aria-label': t('ui.params.var.delete', { name: v.name }), onclick: () => deleteVar(v.name) }, '×'))),
+      usedRow(v.name)];
     });
     const newName = el('input', { type: 'text', className: 'pc-input', placeholder: t('ui.params.new.name_ph'), maxLength: 40, 'aria-label': t('ui.params.new.name'), spellcheck: false, dataset: { newName: '' } });
     const newExpr = el('input', { type: 'text', className: 'pc-input', placeholder: t('ui.params.new.value_ph'), 'aria-label': t('ui.params.new.value'), spellcheck: false, dataset: { newExpr: '' } });

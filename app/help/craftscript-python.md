@@ -1,20 +1,18 @@
 ---
 title: Scripts in Python
-summary: Write Script workspace scripts in Python 3: the cs object of built-in functions, arrays as numpy-like values with 0-based indexing, the shared workspace, printing, what is not there yet, and why to run only Python scripts you trust.
+summary: Write Script workspace scripts in Python 3: the cs object of built-in functions, arrays as numpy-like values with 0-based indexing, the shared workspace, printing, what is not there yet, and how Python is sealed off like CraftScript and Lua.
 section: reference
 order: 63
-keywords: Python, Python 3, pyodide, script, language, cs, ws, workspace, numpy, array, matrix, indexing, print, display, trust
+keywords: Python, Python 3, CPython, WebAssembly, sealed, safe, script, language, cs, ws, workspace, numpy, array, matrix, indexing, print, display, trust
 ---
 
 Python is the third language of the [Script workspace](topic:craftscript). Choose **Python** in the language box above the editor (a `.py` file opens in Python by itself). Python, Lua and CraftScript share the same variables and the same built-in functions, so a Python script can use what a CraftScript script made, and the other way round.
 
-The first Python run in a visit loads Python itself (about 13 MB) from this site, which takes a few seconds. Python is not part of {{ui:Save for offline}} yet: run one Python script while online first.
+The first Python run in a visit loads Python itself (CPython 3.14, about 7 MB) from this site, which takes a few seconds. Python is not part of {{ui:Save for offline}} yet: run one Python script while online first.
 
-## Run only Python scripts you trust
+## Python is sealed off
 
-:::warning
-CraftScript and Lua scripts are sealed off: they can only reach the part, the variables and the built-in functions. **Python scripts are not.** Python in the browser can reach everything a web page can, the network too, and on the command line it runs with your account. PartCraft refuses `import js`, `import pyodide` and `import gc` and gives Python no JavaScript objects, but that only keeps honest scripts honest. The console says so on the first Python run.
-:::
+Python scripts are sealed off like CraftScript and Lua scripts: they reach the part, the variables and the built-in functions, and nothing else. Each run is a fresh Python in its own sandbox with a small file tree in memory (its standard library and a `/tmp` folder that is gone after the run). It cannot reach the network, your files or the rest of the page, in the browser and on the command line alike. A script from someone else can still use a lot of time or memory: {{ui:Stop}} ends it.
 
 ## The essentials
 
@@ -45,6 +43,8 @@ Library functions are called like built-in ones: `cs.box_mesh(20, 10, 10, 5, 'he
 
 ## Not there yet
 
-- numpy, scipy and other packages: only Python's own standard library (`math`, `json`, `itertools`…) is here.
+- numpy, scipy and other packages: only Python's own standard library (`math`, `json`, `itertools`, `decimal`, `statistics`…) is here, without its windows, terminal and database parts (`tkinter`, `curses`, `sqlite3`).
+- Sockets and anything else that would reach outside: Python has no network here.
+- `time.sleep` returns at once.
 - Folding in the editor, and calling a Python function from a CraftScript script.
 - A run checks the instruction budget and Stop every 1000 lines; a long calculation inside one built-in function finishes first.

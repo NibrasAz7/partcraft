@@ -33,6 +33,8 @@ import { solveSketch } from './solver.js';
 import * as P from './part.js';
 import { regenerate, faceRefAt, planeFrame, MESH_BUILT } from './kernel.js';
 import * as X from './export.js';
+import { partIfc } from './ifc-export.js';
+import { evaluateVars } from './params.js';
 import { faceLoops2D } from './faces.js';
 import { composeSheet, meshViews, toPdf as drawingPdf, scaleLabel, sheetLabel, nextRevision, partHoles } from './drawing.js';
 import { MATERIALS, presetOf } from './bom.js';
@@ -50,6 +52,10 @@ import { installSurfaceUI, SURFACE_TYPES, SURFACE_MENU, SURFACE_ICONS } from './
 import { installBodiesUI, BODY_TYPES, BODY_MENU, BODY_ICONS } from './bodies-ui.js';
 import { installSheetUI, SHEET_TYPES, SHEET_MENU, SHEET_ICONS } from './sheet-ui.js';
 import { installRibUI, RIB_TYPES, RIB_MENU, RIB_ICONS } from './rib-ui.js';
+import { threadNotes } from './threads.js';
+import { PARAM_FIELDS } from './params-part.js';
+import { startAddons } from './addons/partcraft-api.js';
+import { installThreadUI, THREAD_ICONS } from './thread-ui.js';
 import { hiddenGeometry } from './bodies.js';
 import * as WS from './workspaces.js';
 import { computeWorker } from './compute-worker.js';
@@ -58,14 +64,14 @@ import { createMeasure } from './measure-ui.js';
 import { createSection } from './section-ui.js';
 import { createDraft } from './draft-ui.js';
 import { faceSection } from './section.js';
-import { t, has } from './i18n.js';
+import { t, has, locale } from './i18n.js';
 import { createAsmTools } from './asm-ui.js';
 // Workspaces (docs/apps/partcraft-workspaces.md): one import line per ws-<id>.js; each registers itself.
 import './ws-form.js';
 import './ws-simulation.js';
 import './ws-generative.js';
 import './ws-manufacture.js';
-import './ws-script.js';
+import { dockEditor, undockEditor } from './ws-script.js';
 import { mountViewCube, mountAxisIcon } from './viewcube.js';
 import { threeCubeOptions } from './viewcube-three.js';
 import { Autosave } from "./app-autosave.js";
@@ -74,13 +80,17 @@ import { getHost } from "./host.js";
 const root = document.querySelector('[data-partcraft]');
 if (root) init(root);
 
-const ICONS = { sketch: 'pencil-square', extrude: 'box-arrow-up', revolve: 'arrow-repeat', hole: 'record-circle', lpattern: 'grid-3x2-gap', cpattern: 'arrow-clockwise', mirror: 'symmetry-vertical', fillet: 'app', chamfer: 'hexagon', shell: 'box2', import: 'box-arrow-in-down', ...DESIGN_ICONS, ...SURFACE_ICONS, ...BODY_ICONS, ...SHEET_ICONS, ...RIB_ICONS };
+const ICONS = { sketch: 'pencil-square', extrude: 'box-arrow-up', revolve: 'arrow-repeat', hole: 'record-circle', lpattern: 'grid-3x2-gap', cpattern: 'arrow-clockwise', mirror: 'symmetry-vertical', fillet: 'app', chamfer: 'hexagon', shell: 'box2', import: 'box-arrow-in-down', ...DESIGN_ICONS, ...SURFACE_ICONS, ...BODY_ICONS, ...SHEET_ICONS, ...RIB_ICONS, ...THREAD_ICONS };
 const SOLID = new Set(['extrude', 'revolve', 'hole', 'lpattern', 'cpattern', 'mirror', 'import', 'sweep', 'loft']);
-const PICKERS = new Set(['fillet', 'chamfer', 'shell', 'draft']);
-const FACE_PICKERS = new Set(['shell', 'draft']);   // pickers whose references are faces (the others take edges)   // features whose references are picked in the view
+const PICKERS = new Set(['fillet', 'chamfer', 'shell', 'draft', 'thread']);
+/** Each feature's main number, typed straight after selecting it (0.5 usability pass). */
+const MAIN_NUMBER = { extrude: 'depth', revolve: 'angle', hole: 'd', lpattern: 'count', cpattern: 'count', fillet: 'r', chamfer: 'd', shell: 't', draft: 'angle', rib: 't', plane: 'd', thread: 'length' };
+const FACE_PICKERS = new Set(['shell', 'draft', 'thread']);
+/** Pickers whose faces or edges the mesh kernel names (K.2b) and builds (K.4, K.5; the thread, 0.5 WL.29). */
+const PICK_ON_MESH = new Set([...MESH_BUILT, 'thread']);   // pickers whose references are faces (the others take edges)   // features whose references are picked in the view
 const DESIGN_GROUPS = ['sketch', 'features', 'drawing', 'assembly'];   // toolbar groups only the Design workspace shows
 const f3 = (v) => V.fmt(v, 3);
-const ASM_EXPORTS = ['export-stl', 'export-3mf', 'export-step', 'export-step214', 'export-drawing', 'export-bom'];   // what an assembly exports as a whole (asm-ui.js)
+const ASM_EXPORTS = ['export-print', 'export-stl', 'export-3mf', 'export-step', 'export-step214', 'export-drawing', 'export-bom', 'export-ifc'];   // what an assembly exports as a whole (asm-ui.js)
 
 function init(root) {
   const $ = (s) => root.querySelector(s);
@@ -107,6 +117,7 @@ function init(root) {
   let lastSolve = null;
   let pendingSketch = false;  // Sketch pressed with nothing picked: the next plane/face pick starts it
   // assembly (mode 'assembly'): its own document, history and selection
+  let addons = null;   // PartCraft's own add-on API 1.0 (addons/partcraft-api.js; 0.5 AO.7, wired by `part`)
   let asm = null, asmBuilds = new Map(), asmPlace = null, asmSel = null, jointPick = null, asmDirty = false, clashes = null;
   let asmSweep = null;   // which joint value the clash check sweeps (0.4 P19)
   const asmHist = new P.History();
@@ -153,7 +164,9 @@ function init(root) {
   view.onResize = () => { if (mode === 'sketch') { view.setSketch(currentFrame(), editor.view); editor.draw(); } };
 
   // ---------------------------------------------------------------- settings (Settings › PartCraft; per viewer conveniences)
-  const SET_DEFAULTS = { orbit: 'left', scroll: 'auto', autoRel: true, corner: 'cube', threads: 'auto' };
+  const SET_DEFAULTS = { orbit: 'left', scroll: 'auto', autoRel: true, corner: 'cube', threads: 'auto', bed: null };
+  // the printer's bed for the 3D-printing check (0.5 SG.4): [x, y, z] mm, each 10–5000, or null = not checked
+  const okBed = (v) => v === null || (Array.isArray(v) && v.length === 3 && v.every((n) => Number.isFinite(n) && n >= 10 && n <= 5000));
   const okThreads = (v) => v === 'auto' || (Number.isInteger(v) && v >= 1 && v <= MAX_THREADS);
   const settings = (() => {
     const out = { ...SET_DEFAULTS };
@@ -164,6 +177,7 @@ function init(root) {
       if (v && typeof v.autoRel === 'boolean') out.autoRel = v.autoRel;
       if (v && ['cube', 'axes', 'none'].includes(v.corner)) out.corner = v.corner;
       if (v && okThreads(v.threads)) out.threads = v.threads;
+      if (v && v.bed !== undefined && okBed(v.bed)) out.bed = v.bed;
     } catch { /* private window or bad data: defaults */ }
     return out;
   })();
@@ -206,6 +220,7 @@ function init(root) {
     const ar = settingsDlg.querySelector('input[name="pcAutoRel"]');
     if (ar) ar.checked = settings.autoRel;
     settingsDlg.querySelectorAll('input[name="pcCorner"]').forEach((r) => { r.checked = r.value === settings.corner; });
+    ['x', 'y', 'z'].forEach((k, i) => { const f = settingsDlg.querySelector(`input[name="pcBed${k.toUpperCase()}"]`); if (f) f.value = settings.bed ? String(settings.bed[i]) : ''; });
     const th = settingsDlg.querySelector('select[name="pcThreads"]');
     if (th) {
       if (th.options.length && th.options[0].value === 'auto') th.options[0].textContent = t('app.settings.threads_auto', { n: AUTO_THREADS() });
@@ -222,6 +237,11 @@ function init(root) {
       else if (tg.name === 'pcScroll') setSetting('scroll', tg.value);
       else if (tg.name === 'pcCorner') setSetting('corner', tg.value);
       else if (tg.name === 'pcThreads') { const v = tg.value === 'auto' ? 'auto' : Number(tg.value); if (okThreads(v)) setSetting('threads', v); }
+      else if (/^pcBed[XYZ]$/.test(tg.name)) {
+        const vals = ['X', 'Y', 'Z'].map((k) => settingsDlg.querySelector(`input[name="pcBed${k}"]`)?.value.trim() || '');
+        if (vals.every((v) => v === '')) setSetting('bed', null);
+        else { const b = vals.map(Number); if (okBed(b)) { setSetting('bed', b); status(t('app.settings.bed_set', { x: b[0], y: b[1], z: b[2] })); } else status(t('app.settings.bed_bad')); }
+      }
       else if (tg.name === 'pcAutoRel') { setSetting('autoRel', tg.checked); status(tg.checked ? t('app.settings.autorel_on') : t('app.settings.autorel_off')); }
     });
     settingsDlg.addEventListener('cc-settings-reset', () => { Object.assign(settings, SET_DEFAULTS); persistSettings(); applySettings(); });
@@ -230,7 +250,7 @@ function init(root) {
   }
   window.addEventListener('storage', (e) => {
     if (e.key !== 'partcraft.settings') return;
-    try { const v = JSON.parse(e.newValue || '{}'); if (v.orbit === 'left' || v.orbit === 'middle') settings.orbit = v.orbit; if (['auto', 'mouse', 'trackpad'].includes(v.scroll)) settings.scroll = v.scroll; if (typeof v.autoRel === 'boolean') settings.autoRel = v.autoRel; if (['cube', 'axes', 'none'].includes(v.corner)) settings.corner = v.corner; if (okThreads(v.threads)) settings.threads = v.threads; } catch { /* ignore */ }
+    try { const v = JSON.parse(e.newValue || '{}'); if (v.orbit === 'left' || v.orbit === 'middle') settings.orbit = v.orbit; if (['auto', 'mouse', 'trackpad'].includes(v.scroll)) settings.scroll = v.scroll; if (typeof v.autoRel === 'boolean') settings.autoRel = v.autoRel; if (['cube', 'axes', 'none'].includes(v.corner)) settings.corner = v.corner; if (okThreads(v.threads)) settings.threads = v.threads; if (v.bed !== undefined && okBed(v.bed)) settings.bed = v.bed; } catch { /* ignore */ }
     applySettings();
   });
   applySettings();
@@ -343,6 +363,7 @@ function init(root) {
     else keepFocus(() => renderProps());
     updateTools();
     if (ws !== WS.DESIGN) wsCall('rebuilt', host);
+    addons?.changed('rebuild');   // add-ons' part.onChange (an undo and an open rebuild too)
     for (const w of waiters.splice(0)) w();
   }
 
@@ -544,12 +565,12 @@ function init(root) {
   function startPick(id) {
     const f = P.featureById(part, id);
     if (!f || !PICKERS.has(f.type) || notInDesign()) return;
-    if (!useExact && !(MESH_BUILT.has(f.type) && named())) { status(exactWhy(t('kernel.what.pick'), exact.state === 'loading' ? t('app.pick.needs_exact_loading') : t('app.pick.needs_exact_off'))); return; }
+    if (!useExact && !(PICK_ON_MESH.has(f.type) && named())) { status(exactWhy(t('kernel.what.pick'), exact.state === 'loading' ? t('app.pick.needs_exact_loading') : t('app.pick.needs_exact_off'))); return; }
     if (mode === 'sketch') exitSketch();
     mode = 'pick'; editing = id; sel = { kind: 'feature', id };
     pick = null; multi = []; view.setHighlight(null);
     rebuild(); renderAll();
-    status(f.type === 'draft' ? t('app.pick.start_draft', { name: f.name }) : f.type === 'shell' ? t('app.pick.start_shell', { name: f.name }) : t('app.pick.start_edges', { name: f.name }), true);
+    status(f.type === 'thread' ? t('thread.ui.pick_start', { name: f.name }) : f.type === 'draft' ? t('app.pick.start_draft', { name: f.name }) : f.type === 'shell' ? t('app.pick.start_shell', { name: f.name }) : t('app.pick.start_edges', { name: f.name }), true);
     focusStage();
   }
   function endPick() {
@@ -567,6 +588,7 @@ function init(root) {
       if (!h || h.kind !== 'face' || h.face === undefined) { status(t('app.pick.click_face'), true); return; }
       const fc = regen.faces[h.face];
       if (!fc?.name) { status(t('app.pick.face_unnamed'), true); return; }
+      if (f.type === 'thread' && fc.type !== 'cylinder') { status(t('thread.ui.pick_round'), true); return; }
       const i = f.faces.findIndex((r) => findFace(regen.faces, r) === h.face);
       commit(i >= 0 ? t('app.undo.drop_face') : t('app.undo.add_face'), () => { const g = P.featureById(part, f.id); if (i >= 0) g.faces.splice(i, 1); else g.faces.push(faceRef(fc)); });
       status(t('app.pick.faces_open', { name: f.name, n: P.featureById(part, f.id).faces.length }), true);
@@ -746,10 +768,11 @@ function init(root) {
       return;
     }
     if (PICKERS.has(type)) {
-      if (!useExact && !(MESH_BUILT.has(type) && named())) { status(exactWhy(label, exact.state === 'loading' ? t('app.feature.needs_exact_loading', { what: label }) : t('app.feature.needs_exact_off', { what: label }))); return; }
+      if (!useExact && !(PICK_ON_MESH.has(type) && named())) { status(exactWhy(label, exact.state === 'loading' ? t('app.feature.needs_exact_loading', { what: label }) : t('app.feature.needs_exact_off', { what: label }))); return; }
       if (!regen?.mesh) { status(t('app.feature.build_solid_first')); return; }
       const want = FACE_PICKERS.has(type) ? 'face' : 'edge';
-      const picked = [...multi, ...(pick && !multi.length ? [pick] : [])].filter((m) => m.kind === want && m.ref && (want === 'edge' || m.ref.name || m.info?.name));
+      const picked = [...multi, ...(pick && !multi.length ? [pick] : [])].filter((m) => m.kind === want && m.ref && (want === 'edge' || m.ref.name || m.info?.name))
+        .filter((m) => type !== 'thread' || (m.info?.type ?? regen?.faces?.[m.face]?.type) === 'cylinder');
       props = FACE_PICKERS.has(type)
         ? { faces: picked.map((m) => (m.ref.name ? m.ref : faceRef(m.info))), ...props }
         : { edges: picked.map((m) => m.ref), ...props };
@@ -788,11 +811,17 @@ function init(root) {
         props[type === 'lpattern' ? 'dir' : 'axis'] = { kind: 'fixed', o: pick.a, d };
       }
     }
+    const first = !regen?.mesh;
     const f = commit(label, () => P.addFeature(part, type, props));
     sel = { kind: 'feature', id: f.id };
     pick = null; view.setHighlight(null);
     renderAll();
-    built().then(() => { const r = regen.results.get(f.id); status(r?.status === 'error' ? t('app.feature.error', { name: f.name, error: r.message }) : t('app.feature.added', { name: f.name })); });
+    built().then(() => {
+      const r = regen.results.get(f.id);
+      const what = PARAM_FIELDS[type]?.[MAIN_NUMBER[type]]?.label;
+      status(r?.status === 'error' ? t('app.feature.error', { name: f.name, error: r.message }) : what ? t('app.feature.added_type', { name: f.name, what }) : t('app.feature.added', { name: f.name }));
+      if (first && regen?.mesh && mode === 'model') view.fit();   // the first solid fills the view (0.5 usability pass)
+    });
   }
 
   function setFeature(id, label, fn) {
@@ -917,6 +946,8 @@ function init(root) {
   const paramsUI = mountParams({
     root, part: () => part, commit: (label, fn) => commit(label, fn), status: (m, keep) => status(m, keep), ask: (o) => ask(o),
     download: (text, name, type) => download(text, name, type), openText: (text, name) => openText(text, name), mode: () => mode, fileBase: () => fileBase(),
+    // a parameter's "Used by" entry: select that feature and show its properties (0.5 WL.30)
+    selectFeature: (id) => { if (!P.featureById(part, id)) return; selectFeature(id); paramsUI.showTab('props'); },
   });
   /** A one-line text box; onchange gets the cleaned text (control characters out, trimmed, cut at max). */
   const textInput = (value, onchange, { max = 60, placeholder = '', attrs = {} } = {}) => {
@@ -964,6 +995,10 @@ function init(root) {
     el, field, numInput, selectInput, check, btn, msg, status, setFeature: (id, label, fn) => setFeature(id, label, fn), built: () => built(),
     get part() { return part; }, get regen() { return regen; }, get sel() { return sel; }, get useExact() { return useExact; },
   });
+  const TU = installThreadUI({
+    el, field, numInput, selectInput, check, setFeature: (id, label, fn) => setFeature(id, label, fn),
+    get regen() { return regen; },
+  });
   const SH = installSheetUI({
     flatPattern: () => exact.call('sheetFlat', { part }), saveText: (name, text, type) => download(text, name, type), fileBase: () => fileBase(),
     el, field, numInput, selectInput, check, btn, msg, status, renderProps: () => renderProps(), focusStage: () => focusStage(),
@@ -1004,8 +1039,26 @@ function init(root) {
         out.push(p, el('p', { className: 'pc-note' }, t('app.edge.note_mesh')));
       }
     } else { head = t('app.props.part'); out.push(...partProps()); }
+    out.push(...addonSections());
     ui.propsH.textContent = head;
     swapChildren(ui.props, out);
+  }
+
+  /** Add-ons' Properties sections for the selection (heading + rows; a field with edit() gets a box whose change calls it). */
+  function addonSections() {
+    const out = [];
+    for (const sct of addons?.propsSections(sel, part) || []) {
+      const rows = [];
+      for (const fl of sct.fields) {
+        if (fl.edit) {
+          const inp = el('input', { type: 'text', className: 'pc-input', value: fl.value });
+          inp.addEventListener('change', () => { try { fl.edit(inp.value); } catch (e) { status(e && e.message ? e.message : String(e)); } });
+          rows.push(...field(fl.label, inp));
+        } else rows.push(el('span', { className: 'k' }, fl.label), el('span', { className: 'v' }, fl.value));
+      }
+      out.push(el('div', { className: 'pc-block', dataset: { addonSection: sct.key } }, el('p', { className: 'pc-props-sub', style: 'margin-top:0' }, sct.label), el('div', { className: 'pc-props' }, ...rows)));
+    }
+    return out;
   }
 
   function partProps() {
@@ -1149,6 +1202,9 @@ function init(root) {
       SH.panel(f, grid, out);
     } else if (RIB_TYPES.has(f.type)) {
       RB.panel(f, grid, out);
+    } else if (f.type === 'thread') {
+      TU.panel(f, grid, out);
+      out.push(refList(f, 'faces'));
     } else if (BODY_TYPES.has(f.type)) {
       BUI.panel(f, grid, out);
     } else if (SURFACE_TYPES.has(f.type)) {
@@ -1162,6 +1218,7 @@ function init(root) {
       grid.push(...field(t('app.import.up_in_file'), selectInput([['z', t('app.import.z_up')], ['y', t('app.import.y_up')]], f.up, (v) => set(t('app.import.up_axis'), (g) => { g.up = v; }))));
     }
     if (!DESIGN_TYPES.has(f.type)) DUI.extra(f, grid);
+    TU.holeExtra(f, grid);   // a tapped hole's modelled thread (thread-ui.js)
     BUI.extra(f, grid);   // linear / circular patterns: copy bodies (bodies-ui.js)
     if (grid.length) out.push(el('div', { className: 'pc-props' }, ...grid));
     if (typeof f.sketch === 'string') { const sf = P.featureById(part, f.sketch); const d = sf && sketchDimsBlock(sf, t('app.dims.sketch')); if (d) out.push(d); }
@@ -1185,7 +1242,7 @@ function init(root) {
     const m = /^(f\d+)\.([a-z]+)(?::([^@~]+))?/.exec(name || '');
     if (!m) return '?';
     const g = P.featureById(part, m[1]);
-    const FACE_KINDS = ['start', 'end', 'side', 'wall', 'floor', 'cbore', 'cfloor', 'top', 'blend', 'corner', 'bevel', 'face', 'draft', 'csink', 'far'];
+    const FACE_KINDS = ['start', 'end', 'side', 'wall', 'floor', 'cbore', 'cfloor', 'top', 'blend', 'corner', 'bevel', 'face', 'draft', 'csink', 'far', 'thread', 'tend'];
     const kind = FACE_KINDS.includes(m[2]) ? t('app.face.kind.' + m[2]) : m[2];
     let out = t('app.face.words', { feature: g ? g.name : t('app.plane.deleted_feature'), kind }) + (m[2] === 'face' && m[3] ? ' ' + m[3].split('_').map((x) => Number(x) + 1).join('.') : '');
     for (const k of String(name).matchAll(/([@~])(f\d+)(?:#(\d+|m))?/g)) {
@@ -1208,7 +1265,7 @@ function init(root) {
     return el('div', { className: 'pc-block' },
       el('p', { className: 'pc-note' }, key === 'edges' ? t('app.refs.edges_note') : t('app.refs.faces_note')),
       items.length ? el('ul', { className: 'pc-list' }, ...items) : el('p', { className: 'pc-muted' }, key === 'edges' ? t('app.refs.no_edges') : t('app.refs.no_faces')),
-      el('div', { className: 'pc-actions' }, picking ? btn(t('app.refs.done_picking'), () => endPick(), 'pc-btn is-primary') : btn(key === 'edges' ? t('app.refs.pick_edges') : t('app.refs.pick_faces'), () => startPick(f.id), 'pc-btn is-primary', { disabled: !useExact && !(MESH_BUILT.has(f.type) && named()), title: useExact || (MESH_BUILT.has(f.type) && named()) ? '' : exactWhy(t('kernel.what.pick'), t('app.refs.needs_exact')) })));
+      el('div', { className: 'pc-actions' }, picking ? btn(t('app.refs.done_picking'), () => endPick(), 'pc-btn is-primary') : btn(key === 'edges' ? t('app.refs.pick_edges') : t('app.refs.pick_faces'), () => startPick(f.id), 'pc-btn is-primary', { disabled: !useExact && !(PICK_ON_MESH.has(f.type) && named()), title: useExact || (PICK_ON_MESH.has(f.type) && named()) ? '' : exactWhy(t('kernel.what.pick'), t('app.refs.needs_exact')) })));
   }
 
   function seedsField(f, allowBody = false) {
@@ -1386,6 +1443,8 @@ function init(root) {
       if (c === 'asm-new') b.hidden = inAsm || !!editPartOf;
     }
     for (const b of ui.tools.querySelectorAll('[data-cmd="export-bom"]')) b.hidden = !inAsm;
+    // File › Standard part opens a new part: not offered inside a sketch, which keeps the sketch toolbar to one row at 1440 px
+    for (const b of ui.tools.querySelectorAll('[data-cmd="std-part"]')) b.hidden = inSk;
     for (const b of ui.tools.querySelectorAll('[data-cmd="view-measure"]')) b.setAttribute('aria-checked', String(!!measure?.active));
     for (const b of ui.tools.querySelectorAll('[data-cmd="view-section"]')) b.setAttribute('aria-checked', String(!!section?.active));
     for (const [c, m] of [['view-draft', 'draft'], ['view-zebra', 'zebra'], ['view-curvature', 'curvature']]) for (const b of ui.tools.querySelectorAll(`[data-cmd="${c}"]`)) b.setAttribute('aria-checked', String(!!draft?.active && draft.mode === m));
@@ -1494,6 +1553,7 @@ function init(root) {
   }
 
   async function run(cmd) {
+    if (addons?.runCommand(cmd)) return;   // an add-on's command ('<add-on id>:<name>')
     for (const d of ui.tools.querySelectorAll('details[open]')) d.open = false;
     // the active workspace sees every command first; its own (<id>-…) never reach Design
     if (ws !== WS.DESIGN && wsCall('command', cmd, host) === true) return;
@@ -1505,15 +1565,18 @@ function init(root) {
     if (cmd === 'view-curvature') { draft.toggle('curvature'); updateTools(); return; }
     if (cmd === 'view-measure') { if (mode === 'sketch' || mode === 'drawing') { status(t('app.measure.model_only')); return; } measure.toggle(); updateTools(); return; }
     if (cmd === 'view-mass') { if (mode === 'sketch' || mode === 'drawing') { status(t('app.measure.mass_model_only')); return; } measure.mass(); updateTools(); return; }
+    if (cmd === 'export-print') return checkPrint();
     if (mode === 'assembly' && ASM_EXPORTS.includes(cmd)) return asmTools.exportCmd(cmd);
     if (SKETCH_TOOLS[cmd]) { if (mode === 'sketch') editor.setTool(editor.tool === SKETCH_TOOLS[cmd] ? 'select' : SKETCH_TOOLS[cmd]); focusStage(); return; }
     if (exactOff() && P.EXACT_ONLY.has(cmd) && !MESH_BUILT.has(cmd)) { status(t('kernel.not_built', { what: P.FEATURE_LABELS[cmd] }), true); return; }
     switch (cmd) {
       case 'new': return newPart();
+      case 'std-part': return openStandardPart();
       case 'open': if (await confirmDiscard()) { const [hf] = await fileHost.openFile({ types: [{ description: 'PartCraft, STEP', extensions: ['.json', '.step', '.stp'] }] }); await openFromHost(hf); } return;   // i18n-ignore: a file type label the OS shows
       case 'save': return savePart();
       case 'export-stl': return exportMesh('stl');
       case 'export-3mf': return exportMesh('3mf');
+      case 'export-ifc': return exportIfc();
       case 'export-step': return exportStep('AP242');
       case 'export-step214': return exportStep('AP214');
       case 'export-step-faceted': return exportMesh('step');
@@ -1527,6 +1590,7 @@ function init(root) {
       case 'patch': case 'surfloft': case 'stitch': case 'thicken': case 'offsetsurf': case 'extendsurf': case 'trimsurf': case 'gordon': return newFeature(cmd, {});
       case 'combine': case 'movebody': case 'scalebody': case 'pathpattern': return newFeature(cmd, {});
       case 'sheetbase': case 'sheetflange': case 'rib': return newFeature(cmd, {});
+      case 'thread': return newFeature('thread', {});
       case 'pick-done': return endPick();
       case 'drawing': return enterDrawing();
       case 'dr-back': return leaveDrawing();
@@ -1578,8 +1642,13 @@ function init(root) {
     if (mode === 'assembly') {
       const r = isUndo ? asmHist.undo(asm) : asmHist.redo(asm);
       if (!r) { status(isUndo ? t('app.undo.nothing_undo') : t('app.undo.nothing_redo')); return; }
+      // an undone interference filter (0.5 WL.33) leaves the parts where they were: the check's results stay
+      const bare = (a) => JSON.stringify({ ...a, clashFilter: undefined, version: undefined });
+      const before = bare(asm);
       asm = A.readAssembly(r.part);
-      asmDirty = true; clashes = null; jointPick = null;
+      const sameParts = bare(asm) === before;
+      asmDirty = true; jointPick = null;
+      if (!sameParts) clashes = null;
       if (asmSel && !(asmSel.kind === 'inst' ? asm.instances : asm.joints).some((x) => x.id === asmSel.id)) asmSel = null;
       rebuildAsm(); renderAll();
       status(t(isUndo ? 'app.undo.undid' : 'app.undo.redid', { what: r.label.toLowerCase() }));
@@ -1909,10 +1978,37 @@ function init(root) {
 
   function asmCheck() {
     const t0 = performance.now();
-    clashes = A.interference(asm, asmBuilds, asmPlace.world, M);
+    clashes = A.interference(asm, asmBuilds, asmPlace.world, M, { touch: true });   // with kinds and touching faces (0.5 WL.33)
     renderAll();
     const name = (id) => instById(id)?.name || id;
-    status(clashes.length ? t('app.asm.interference', { list: clashes.map((c) => t('app.asm.overlap', { a: name(c.a), b: name(c.b), vol: f3(c.volume) })).join('; ') }) : t('app.asm.no_interference', { n: asm.instances.length, ms: Math.round(performance.now() - t0) }), true);
+    const { shown, hidden } = A.filterClashes(asm, clashes);
+    const more = hidden.length ? t('asm.clash.hidden_note', { n: hidden.length }) : '';
+    status(shown.length ? t('app.asm.interference', { list: shown.map((c) => clashWords(c, name)).join('; ') }) + more : t('app.asm.no_interference', { n: asm.instances.length, ms: Math.round(performance.now() - t0) }) + more, true);
+  }
+  /** One interference result in words: "Flange1 and Bolt1: thread depth mismatch, 12.3 mm³". */
+  const clashWords = (c, name) => (c.kind === 'touch' ? t('asm.clash.row_touch', { a: name(c.a), b: name(c.b) }) : t('asm.clash.row', { a: name(c.a), b: name(c.b), kind: t('asm.clash.kind.' + c.kind), vol: f3(c.volume) }));
+  /** A filter change: one undo step, saved with the assembly; the results stay (only what is shown changes). */
+  function setClashFilter(label, fn) {
+    asmHist.push(asm, label);
+    fn();
+    asmDirty = true;
+    renderAll();
+  }
+  /** The interference results under the assembly's name: shown ones with "Hide this pair", the kinds to show, hidden counts. */
+  function clashBlock() {
+    const name = (id) => instById(id)?.name || id;
+    const { shown, hidden } = A.filterClashes(asm, clashes || []);
+    const hide = new Set(asm.clashFilter?.hide || []), pairs = asm.clashFilter?.pairs || [];
+    const out = [];
+    if (shown.length) out.push(el('ul', { className: 'pc-list', dataset: { clashes: '' } }, ...shown.map((c) => el('li', { dataset: { clashKind: c.kind, clashPair: c.a + '|' + c.b } },
+      el('span', { className: 'grow' + (c.kind === 'overlap' || c.kind === 'thread-depth' ? ' is-bad' : '') }, clashWords(c, name)),
+      btn(t('asm.clash.hide_pair'), () => setClashFilter(t('asm.clash.undo.hide_pair'), () => A.setPairHidden(asm, c.a, c.b, true)), 'pc-linkbtn', { dataset: { clashHide: '' } })))));
+    const kinds = el('div', { className: 'pc-props', dataset: { clashKinds: '' } }, el('span', { className: 'span pc-props-sub' }, t('asm.clash.show')),
+      ...A.CLASH_KINDS.map((k) => { const c = check(t('asm.clash.kind.' + k), !hide.has(k), (v) => setClashFilter(t('asm.clash.undo.kind'), () => A.setKindHidden(asm, k, !v))); c.dataset.clashKindToggle = k; return c; }));
+    out.push(kinds);
+    if (hidden.length || pairs.length) out.push(el('p', { className: 'pc-note', dataset: { clashHidden: String(hidden.length) } }, hidden.length ? t('asm.clash.hidden', { n: hidden.length }) + ' ' : '',
+      pairs.length ? btn(t('asm.clash.show_pairs', { n: pairs.length }), () => setClashFilter(t('asm.clash.undo.show_pairs'), () => { for (const [a, b] of [...pairs]) A.setPairHidden(asm, a, b, false); }), 'pc-linkbtn', { dataset: { clashShowPairs: '' } }) : null));
+    return el('div', { className: 'pc-block', dataset: { clashBlock: '' } }, el('p', { className: 'pc-props-sub', style: 'margin-top:0' }, t('asm.clash.title')), ...out);
   }
 
   function asmEditPart() {
@@ -2010,7 +2106,7 @@ function init(root) {
   function renderAsmFacts() {
     const free = asmPlace ? asmPlace.problems.filter((x) => x.free).length : 0;
     fillDl(ui.facts, [[t('app.asm.tree_parts'), Object.keys(asm.parts).length], [t('app.asm.facts_instances'), asm.instances.length], [t('app.asm.tree_joints'), asm.joints.length], [t('app.asm.facts_not_joined'), free || ''],
-      [t('app.asm.facts_interference'), clashes === null ? t('app.asm.not_checked') : clashes.length ? t('app.asm.pairs_overlap', { n: clashes.length }) : t('app.asm.none')]]);
+      [t('app.asm.facts_interference'), clashes === null ? t('app.asm.not_checked') : ((n) => (n ? t('asm.clash.facts', { n }) : t('app.asm.none')))(A.filterClashes(asm, clashes).shown.length)]]);
   }
 
   function endLabel(e) {
@@ -2070,7 +2166,7 @@ function init(root) {
       const motion = btn(t('asm.joint.check'), () => {
         const key = asmSweep || dof[0];
         const [from, to] = span(key);
-        const res = A.motionCheck(asm, asmBuilds, M, j.id, from, to, 24, key);
+        const res = A.motionCheck(asm, asmBuilds, M, j.id, from, to, 24, key).map((x) => ({ ...x, pairs: A.filterClashes(asm, x.pairs).shown }));   // the filters apply (0.5 WL.33)
         const bad = res.filter((x) => x.pairs.length);
         status(bad.length ? t('asm.joint.check_bad', { n: bad.length, of: res.length, value: valueLabel(key), at: f3(bad[0].value), vol: f3(bad[0].pairs[0].volume) }) : t('asm.joint.check_ok', { value: valueLabel(key), from: f3(from), to: f3(to), n: res.length }), true);
       }, 'pc-btn', { disabled: !dof.length, dataset: { jointCheck: '' } });
@@ -2099,7 +2195,7 @@ function init(root) {
       out.push(el('div', { className: 'pc-props' }, ...field(t('app.props.name'), nameIn)));
       out.push(el('p', { className: 'pc-note' }, t('app.asm.note')));
       for (const pr of asmPlace?.problems || []) out.push(msg(pr.message, pr.free ? '' : 'is-error'));
-      if (clashes && clashes.length) out.push(el('ul', { className: 'pc-list' }, ...clashes.map((c) => el('li', {}, el('span', { className: 'grow is-bad' }, t('app.asm.clash_row', { a: instById(c.a)?.name, b: instById(c.b)?.name, vol: f3(c.volume) }))))));
+      if (clashes || asm.clashFilter) out.push(clashBlock());
       if (asmPlace) out.push(...asmTools.rootSections());
     }
     ui.propsH.textContent = head;
@@ -2156,7 +2252,7 @@ function init(root) {
   async function drawingViewsNow(d) {
     if (useExact) return exact.call('drawing', { part, drawing: { section: d.section } });
     await built();
-    return meshViews(regen.mesh, { M, section: d.section });   // the mesh kernel's own section view (0.4 K.3)
+    return { ...meshViews(regen.mesh, { M, section: d.section }), threads: threadNotes(regen.threads) };   // the mesh kernel's own section view (0.4 K.3); thread callouts (0.5 WL.29)
   }
 
   async function drawingRefresh() {
@@ -2397,6 +2493,8 @@ function init(root) {
   }
   fileHost.onOpenFiles(async (files) => { if (files[0] && await confirmDiscard()) await openFromHost(files[0]); });
   ready.then(async () => { const [first] = await fileHost.launchFiles(); if (first) await openFromHost(first); });   // desktop: the file it was started with
+  // Studio Live from a link (#live=<code> on a host's LAN page, ?live=<ROOM>#<secret> from an invite): join; the part comes from the host
+  if (/[#&]live=|[?&]live=/.test(location.hash + location.search)) ready.then(() => import('./live.js')).then((m) => m.joinFromPage(window.partcraft, fileHost), (err) => status(err.message));
   async function savePart() {
     if (mode === 'assembly') { saveAssembly(); return; }
     if (mode === 'sketch') exitSketch();
@@ -2415,6 +2513,53 @@ function init(root) {
     if (kind === 'stl') { download(X.stlBinary(regen.mesh, name), name + '.stl', 'model/stl'); status(t('app.export.stl', { file: name + '.stl', n: regen.mesh.indices.length / 3 })); }
     else if (kind === '3mf') { download(X.threeMf(regen.mesh, name), name + '.3mf', 'model/3mf'); status(t('app.export.3mf', { file: name + '.3mf' })); }
     else { const s = X.stepFaceted(regen.mesh, name, { schema: kind === 'step214' ? 'AP214' : 'AP242' }); download(s.text, name + '.step', 'model/step'); status(t('app.export.step_faceted', { file: name + '.step', n: s.counts.faces })); }
+  }
+
+  /**
+   * Check for 3D printing (0.5 SG.4, #531): the part (or the whole assembly) as a printer mesh — Z up, mm, as the STL and
+   * 3MF exports write it — through print3d.js: closed, faces the right way, not passing through itself; size against
+   * the bed in Settings, volume, base, overhangs. Then the usual STL or 3MF export.
+   */
+  async function checkPrint() {
+    if (mode === 'sketch') exitSketch();
+    if (mode === 'pick') endPick();
+    const asmMode = mode === 'assembly';
+    if (!asmMode) await built();
+    const src = asmMode ? asmTools.printMesh() : regen?.mesh;
+    if (!src) { status(asmMode ? t('ui.asm.export.building') : t('app.export.no_solid')); return; }
+    const PR = await import('./print3d.js');
+    status(t('app.print3d.checking'), true);
+    await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+    const S = src.positions, n = S.length / 3, pos = new Float64Array(S.length);
+    for (let i = 0; i < n; i++) { pos[i * 3] = S[i * 3]; pos[i * 3 + 1] = -S[i * 3 + 2]; pos[i * 3 + 2] = S[i * 3 + 1]; }   // Y up → Z up, as the exports
+    const rep = PR.printCheck({ positions: pos, indices: src.indices, colors: null }, { bed: settings.bed });
+    const mm = (v) => (Math.round(v * 10) / 10).toLocaleString(locale() === 'en-XA' ? 'en' : locale());
+    const line = (k, x) => el('li', {}, t(k, x));
+    const problems = rep.problems.map((p) => line('app.print3d.p.' + p.kind, { n: p.n }));
+    const warnings = rep.warnings.map((w) => line('app.print3d.w.' + w.kind, { n: w.n || 0, share: Math.max(1, Math.round((w.share || 0) * 100)), angle: w.angle || 45, x: mm(w.bed?.[0] || 0), y: mm(w.bed?.[1] || 0), z: mm(w.bed?.[2] || 0) }));
+    const body = el('div', { className: 'pc-print' },
+      el('p', { className: 'pc-print-verdict', dataset: { printOk: rep.ok ? '1' : '0' } }, t(rep.ok ? 'app.print3d.ready' : 'app.print3d.notready')),
+      problems.length ? el('ul', { className: 'pc-print-problems', dataset: { printProblems: '' } }, ...problems) : null,
+      warnings.length ? el('ul', { className: 'pc-print-warnings', dataset: { printWarnings: '' } }, ...warnings) : null,
+      el('ul', { className: 'pc-print-facts' },
+        el('li', {}, t(asmMode ? 'app.print3d.what.asm' : 'app.print3d.what.part')),
+        rep.size ? el('li', {}, t('app.print3d.size', { w: mm(rep.size[0]), d: mm(rep.size[1]), h: mm(rep.size[2]) })) : null,
+        rep.volume != null ? el('li', {}, t('app.print3d.volume', { v: mm(rep.volume / 1000) })) : null,
+        el('li', {}, t('app.print3d.tris', { n: rep.triangles })),
+        settings.bed ? null : el('li', {}, t('app.print3d.nobed'))));
+    status(t(rep.ok ? 'app.print3d.ready' : 'app.print3d.notready'));
+    if (!rep.triangles) { await ask({ title: t('app.print3d.title'), body, buttons: [['cancel', t('app.btn.close'), 'pc-btn is-primary']] }); return; }
+    const key = await ask({ title: t('app.print3d.title'), body, buttons: [['cancel', t('app.btn.cancel'), 'pc-btn'], ['stl', t('app.print3d.stl'), 'pc-btn'], ['3mf', t('app.print3d.3mf'), 'pc-btn is-primary']] });
+    if (key === 'stl' || key === '3mf') return asmMode ? asmTools.exportCmd('export-' + key) : exportMesh(key);
+  }
+
+  /** IFC4 with every property: geometry, part properties, parameters, title block, quantities (ifc-export.js; 0.5 WL.32). */
+  function exportIfc() {
+    if (mode === 'sketch') exitSketch();
+    if (!regen?.mesh) { status(t('app.export.no_solid')); return; }
+    const name = fileBase(), r = partIfc(part, regen, { evaluate: evaluateVars, fileName: name + '.ifc' });
+    download(r.text, name + '.ifc', 'application/x-step');
+    status(t('app.export.ifc', { file: name + '.ifc', psets: r.counts.psets, n: r.counts.properties }));
   }
 
   async function exportDrawing() {
@@ -2519,6 +2664,31 @@ function init(root) {
     status(t('app.file.new_part'));
   }
 
+  /**
+   * File › Standard part (0.5 MQ.4): a bolt, nut, washer, pin, bearing or key from the standard's table (stdparts.js), opened
+   * as a new part with one configuration per size (Parameters › Configurations switches it).
+   */
+  async function openStandardPart() {
+    if (mode === 'assembly' || editPartOf) { if (!(await closeAssembly())) return; }
+    if (!(await confirmDiscard())) return;
+    const SP = await import('./stdparts.js');
+    const fam = el('select', { className: 'pc-select', id: 'pc-std-fam' }, ...SP.TEMPLATES.map((x) => el('option', { value: x.id }, x.name + ' (' + x.standard + ')')));
+    const size = el('select', { className: 'pc-select', id: 'pc-std-size' });
+    const fill = () => size.replaceChildren(...SP.templateSizes(fam.value).map((z) => el('option', { value: z.size }, z.name)));
+    fam.addEventListener('change', fill);
+    fill();
+    const body = el('div', { className: 'pc-std' },
+      el('label', { htmlFor: 'pc-std-fam' }, t('app.std.part')), fam,
+      el('label', { htmlFor: 'pc-std-size' }, t('app.std.size')), size,
+      el('p', { className: 'pc-muted' }, t('app.std.note')));
+    const ch = await ask({ title: t('app.std.title'), body, buttons: [['cancel', t('app.btn.cancel'), 'pc-btn'], ['open', t('app.std.open'), 'pc-btn is-primary']] });
+    if (ch !== 'open') return;
+    const made = SP.makeTemplate(fam.value, size.value);
+    await openText(P.toJSON(made), made.name);
+    dirty = true;   // a new part, not a file on disk yet
+    status(t('app.std.opened', { name: made.name, size: made.configs.active }));
+  }
+
   /** A cadcraft-sw-export file (CadCraftExport.swb run in SolidWorks): rebuilt by swimport.js in the exact kernel's worker. */
   async function openSwExport(text, name) {
     if (exactOff()) { status(t('kernel.not_built', { what: t('kernel.what.sw_open') }), true); return; }
@@ -2563,6 +2733,7 @@ function init(root) {
 
   ui.file.addEventListener('change', async () => { const f = ui.file.files[0]; ui.file.value = ''; if (f) openFile(f); });
   async function openFile(f) {
+    try { if (await addons?.openFromAddon(f)) return; } catch (e) { status(t('app.file.addon_failed', { name: f.name, error: e && e.message ? e.message : String(e) })); return; }   // an add-on's importer
     if (/\.(step|stp)$/i.test(f.name)) { await importStep(f); return; }
     if (f.size > 50 * 1024 * 1024) { status(t('app.file.too_big')); return; }
     if (!/\.json$/i.test(f.name)) { status(t('app.file.unknown_kind', { name: f.name })); return; }
@@ -2669,11 +2840,11 @@ function init(root) {
   }
 
   /** A small in-page dialog; resolves with the chosen button's key ('cancel' on Esc). */
-  function ask({ title, text, buttons }) {
+  function ask({ title, text, body, buttons }) {
     return new Promise((done) => {
       const dlg = el('dialog', { className: 'pc-dialog', 'aria-labelledby': 'pc-ask-h' },
         el('div', { className: 'pc-dialog-head' }, el('h2', { className: 'pc-h', id: 'pc-ask-h' }, title)),
-        el('p', { className: 'pc-dialog-text' }, text),
+        body ? el('div', { className: 'pc-dialog-text' }, body) : el('p', { className: 'pc-dialog-text' }, text),
         el('div', { className: 'pc-dialog-foot' }, ...buttons.map(([key, label, cls]) => el('button', { type: 'button', className: cls, dataset: { key } }, label))));
       let result = 'cancel';
       const back = document.activeElement;
@@ -2824,6 +2995,7 @@ function init(root) {
     pendingSketch = false; pick = null; multi = []; sel = null;
     view.setHighlight(null); view.setHover(null); view.setMarks(null); view.setPlaneState(null, null);
     measure?.stop(); draft?.stop();
+    if (ws === WS.DESIGN) paramsUI.showTab('props');   // the Design tab's script editor goes home first (0.5 WL.31)
     wsCall('exit', host);
     view.clearOverlays(); view.setFaceColors(null); view.setPartVisible(true);
     ws = next;
@@ -2833,6 +3005,20 @@ function init(root) {
     if (ws === WS.DESIGN) status(t('app.ws.design'));
     else if (!ws.renderPanel) status(t('app.ws.being_built', { ws: ws.label }));
     return true;
+  }
+  // the Script tab of Design's right panel (0.5 WL.31): the Script workspace's editor, while the tree and the view work as in
+  // Design; shown only in Design (the Script workspace has the editor as its panel)
+  {
+    const sec = $('#pc-sec-script'), box = $('[data-script-tab]'), tab = $('#pc-tab-script');
+    // open: the editor moves in and the panel widens as in the Script workspace (data-script-tab-open, partcraft.css)
+    if (sec && box) new MutationObserver(() => {
+      const open = !sec.hidden && ws === WS.DESIGN;
+      if (open) dockEditor(host, box); else undockEditor(host);
+      if (open) root.dataset.scriptTabOpen = ''; else delete root.dataset.scriptTabOpen;
+    }).observe(sec, { attributes: true, attributeFilter: ['hidden'] });
+    const syncTab = () => { if (tab) tab.hidden = ws !== WS.DESIGN; };
+    syncTab();
+    new MutationObserver(syncTab).observe(root, { attributes: true, attributeFilter: ['data-active-workspace'] });
   }
   if (ui.ws) {
     ui.ws.replaceChildren(...WS.listWorkspaces().map((w) => el('option', { value: w.id }, w.label)));
@@ -2903,6 +3089,13 @@ function init(root) {
       return;
     }
     if (typing) return;
+    // 0.5 usability pass: with a feature selected, typing a number starts editing its main value (an Extrude's depth, a Hole's
+    // diameter …) in the panel; Enter sets it. Digits are no shortcut anywhere else
+    if (/^[0-9.]$/.test(e.key) && !e.altKey && mode === 'model' && ws === WS.DESIGN && sel?.kind === 'feature') {
+      const f = P.featureById(part, sel.id), main = f && MAIN_NUMBER[f.type];
+      const inp = main && ui.props.querySelector(`[data-param-key="${f.id}.${main}"]`);
+      if (inp && !inp.disabled) { e.preventDefault(); inp.focus(); inp.value = e.key; inp.setSelectionRange(1, 1); status(t('app.feature.type_main', { name: f.name })); return; }
+    }
     if (tgt && tgt.closest && tgt.closest('.pc-tree') && (e.altKey || e.key.startsWith('Arrow'))) return;
     if (measure?.active && measure.keydown(e)) { e.preventDefault(); return; }
     if (section?.active && section.keydown(e)) { e.preventDefault(); return; }
@@ -2978,6 +3171,32 @@ function init(root) {
     clip: () => clip, DUI, get section() { return section; },
     exportBytes: (kind) => (kind === 'stl' ? X.stlBinary(regen.mesh) : kind === '3mf' ? X.threeMf(regen.mesh) : kind === 'step' ? X.stepFaceted(regen.mesh, part.name).text : null),
     stepText: (schema = 'AP242') => exact.call('step', { part, schema }).then((r) => r.text),
+    // Studio Live (0.5 LV.20, live.js): someone else's edits landed in `part`; a joiner's part arrived; the session's messages
+    status: (m) => status(m),
+    liveApplied: () => {
+      if (editing && !P.featureById(part, editing)) { if (mode === 'sketch') { editor.active = false; ui.sk.hidden = true; view.setSketch(null); ui.skBar.hidden = true; } mode = 'model'; editing = null; }
+      if (sel?.kind === 'feature' && !P.featureById(part, sel.id)) sel = null;
+      dirty = true; rebuild(); renderAll();
+    },
+    liveReplace: (p) => { if (mode === 'sketch') exitSketch(); part = p; hist.clear(); sel = null; pick = null; multi = []; dirty = true; rebuild(); renderAll(); },
   };
+  // the menu styles (0.5 IP.3, input-partcraft.js + the shell's app-input-ui.js): their messages go to the status bar
+  window.ccInputHooks = { status: (text, bad) => status(text || '', bad) };
+  // add-ons (0.5 AO.7): PartCraft's own loader and API; their exporters join the Export menu
+  const syncAddonExports = () => {
+    const list = $('[data-export-menu] .pc-menu-list');   // i18n-ignore: a selector
+    if (!list || !addons) return;
+    for (const b of list.querySelectorAll('[data-addon-export]')) b.remove();
+    for (const ex of addons.exporters()) {
+      list.append(el('button', { type: 'button', role: 'menuitem', dataset: { addonExport: ex.id }, onclick: async () => {
+        list.closest('details')?.removeAttribute('open');
+        try { const name = fileBase() + '.' + ex.extension; download(await ex.write(addons.exportInput(part.name)), name, ex.mime); status(t('app.export.addon', { file: name })); }
+        catch (e) { status(t('app.export.addon_failed', { what: ex.label, error: e && e.message ? e.message : String(e) })); }
+      } }, ex.label));
+    }
+  };
+  startAddons({ host, selection: () => sel, select: (id) => selectFeature(id), find: (q) => root.querySelector(q), showTab: (k) => paramsUI.showTab(k || 'props') })
+    .then((a) => { addons = a; a.onChange(() => { syncAddonExports(); renderProps(); }); syncAddonExports(); renderProps(); })
+    .catch((e) => console.warn('add-ons did not start:', e));   // i18n-ignore: a developer message
   renderAll();
 }

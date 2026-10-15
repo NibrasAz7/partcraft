@@ -19,15 +19,18 @@
         "detailcraft": "DetailCraft"
     },
     "vendor": {
+        "cpython-wasi": "3.14.7",
         "h5wasm": "0.10.3",
         "manifold-3d": "3.5.4",
-        "pyodide": "314.0.7",
+        "noble-ciphers": "2.4.0",
+        "noble-curves": "2.4.0",
+        "noble-hashes": "2.4.0",
         "three": "0.186.1",
         "wasmoon": "1.16.0"
     },
     "origin": "https://getcadcraft.com",
     "packed": {
-        "at": "2026-10-13T20:37:44Z",
-        "build": "0.4"
+        "at": "2026-10-15T10:31:13Z",
+        "build": "dev"
     }
 }

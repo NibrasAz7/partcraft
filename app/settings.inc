@@ -11,6 +11,8 @@
  *   autorel   add relations while sketching (default on): coincident where a click snaps to a point or a curve,
  *             horizontal / vertical for nearly level lines
  *   corner    corner indicator: view cube (default) / axis icon / none (viewcube.js)
+ *   bed       the 3D printer's bed, width × depth × height in mm (empty = not checked; 0.5 SG.4): Check for 3D printing
+ *             warns when a part is larger
  *   threads   solver threads: automatic (default: logical processors − 1, at most 16) or a count (pool.js; used only when the
  *             page is cross-origin isolated — partcraft.js fills in data-pc-threads-state)
  */
@@ -63,4 +65,14 @@
   </select>
   </div>
   <p class="shell-hint-text"><?= Lang::e('ui.settings.threads.hint') ?> <span data-pc-threads-state></span></p>
+</fieldset>
+<fieldset class="shell-set">
+  <legend><?= Lang::e('ui.settings.bed') ?></legend>
+  <div class="shell-row pc-bed" role="group" aria-label="<?= Lang::e('ui.settings.bed.label') ?>">
+    <span><?= Lang::e('ui.settings.bed.label') ?></span>
+    <label><?= Lang::e('ui.settings.bed.x') ?> <input type="number" name="pcBedX" min="10" max="5000" step="1" inputmode="numeric"></label>
+    <label><?= Lang::e('ui.settings.bed.y') ?> <input type="number" name="pcBedY" min="10" max="5000" step="1" inputmode="numeric"></label>
+    <label><?= Lang::e('ui.settings.bed.z') ?> <input type="number" name="pcBedZ" min="10" max="5000" step="1" inputmode="numeric"></label>
+  </div>
+  <p class="shell-hint-text"><?= Lang::e('ui.settings.bed.hint') ?></p>
 </fieldset>

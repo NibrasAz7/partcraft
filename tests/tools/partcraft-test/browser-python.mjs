@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 /* SPDX-License-Identifier: Apache-2.0 */
 /**
- * browser-python.mjs — Python in the Script workspace (0.4 P10), headless Chromium: Language → Python, a script run with F5
- * in the worker (Pyodide loads from this site), the console shows the trust note once and the printed lines, the Variables
+ * browser-python.mjs — Python in the Script workspace (0.4 P10; 0.5: CPython for WASI), headless Chromium: Language → Python, a
+ * script run with F5 in the worker (python.wasm and python-stdlib.zip load from this site's assets/vendor/cpython-wasi, nothing
+ * from Pyodide), the console shows the printed lines and no "not sealed off" note (Python is sealed now), the Variables
  * tab lists what the script made, a Python error underlines its line, and a CraftScript tab reads a Python variable. No
  * console errors.
  *   node tools/partcraft-test/browser-python.mjs [--state /tmp/claude-0/pc-browser-state.json] [--out dir]
@@ -28,14 +29,18 @@ export async function run(h) {
   await page.fill('[data-cs-editor]', ['A = cs.magic(3)', 'B = A @ A.T', 'print("trace", sum(float(B[i, i]) for i in range(3)))', 'side = A[0, :]', 'total = sum(range(5))'].join('\n'));
   await page.focus('[data-cs-editor]'); await page.keyboard.press('F5'); await waitIdle(120000);
   const text = await consoleText();
-  ok(/Python scripts are not sealed off/.test(text) && /trace 285(\.0)?\b/.test(text), `F5 runs it in the worker: the trust note, then "trace 285.0" (magic(3)·magic(3)ᵀ has trace 285)`);
+  ok(!/not sealed off/.test(text) && /trace 285(\.0)?\b/.test(text), `F5 runs it in the worker: "trace 285.0" (magic(3)·magic(3)ᵀ has trace 285), no "not sealed off" note`);
+  await page.fill('[data-cs-editor]', 'import sys\nprint("platform", sys.platform, sys.version.split()[0])\n');
+  await page.focus('[data-cs-editor]'); await page.keyboard.press('F5'); await waitIdle();
+  const plat = (await consoleText()).match(/platform (\S+) (\S+)/);
+  ok(plat && plat[1] === 'wasi' && plat[2] === '3.14.7', `it is CPython for WASI (sys.platform "${plat?.[1]}", ${plat?.[2]}), not Pyodide (which says "emscripten")`);
   const vars = await page.evaluate(() => [...document.querySelectorAll('[data-cs-var]')].map((e) => e.dataset.csVar).join());
   ok(/\bA\b/.test(vars) && /\bB\b/.test(vars) && /side/.test(vars) && /total/.test(vars), `the Variables tab lists A, B, side, total (${vars})`);
   await shot('python-run');
   await page.fill('[data-cs-editor]', 'x = 1\ny = x +\n');
   await page.focus('[data-cs-editor]'); await page.keyboard.press('F5'); await waitIdle();
   const t2 = await consoleText();
-  ok(/line 2/i.test(t2) && /SyntaxError/.test(t2) && (t2.match(/not sealed off/g) || []).length <= 1, 'a syntax error is reported on line 2 (and the trust note is not repeated)');
+  ok(/line 2/i.test(t2) && /SyntaxError/.test(t2), 'a syntax error is reported on line 2');
   await page.selectOption('[data-cs-lang]', 'craft');
   await page.fill('[data-cs-editor]', 'disp(total * 2)');
   await page.focus('[data-cs-editor]'); await page.keyboard.press('F5'); await waitIdle();

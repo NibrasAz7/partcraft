@@ -5,6 +5,7 @@
       { "name": "example_cantilever", "summary": "Cantilever stress" },
       { "name": "example_mbb", "summary": "MBB beam topology" },
       { "name": "example_capacitor", "summary": "Capacitor field" },
+      { "name": "example_electromagnet", "summary": "Electromagnet: field, gap, inductance" },
       { "name": "example_channel", "summary": "Channel flow" }
     ] },
     { "id": "mesh", "label": "Meshing", "items": [

@@ -33,6 +33,7 @@ import { fmt } from './vec.js';
 import { pasteSketch } from './clipboard.js';
 import * as SP from './sketch-spline.js';
 import * as TL from './sketch-tools.js';
+import { panButton, wheelFactor } from './input-mouse.js';   // 0.5 IP.3: the menu style's wheel and pan buttons
 import { pointOn } from './sketch-intersect.js';
 import { t } from './i18n.js';
 
@@ -199,7 +200,7 @@ export class SketchEditor {
         this.setView({ s: v.s, cx: v.cx + e.deltaX * k / v.s, cy: v.cy - e.deltaY * k / v.s });
         return;
       }
-      this.zoomAt(x, y, Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : e.ctrlKey ? 0.01 : 0.0015)));
+      this.zoomAt(x, y, Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : e.ctrlKey ? 0.01 : 0.0015) * (e.ctrlKey ? 1 : wheelFactor())));   // IP.3: the style's wheel
     }, { passive: false });
     c.addEventListener('pointerdown', (e) => this.down(e));
     c.addEventListener('pointermove', (e) => this.move(e));
@@ -236,6 +237,7 @@ export class SketchEditor {
     }
     if (e.button === 1 || e.button === 2) {
       if (e.button === 2 && this.tool !== 'select' && this.step) { this.finishStep(); return; }
+      if (!panButton(e.button)) return;   // IP.3: a button the style does not pan with
       this.pan = { x, y, view: { ...this.view } };
       return;
     }

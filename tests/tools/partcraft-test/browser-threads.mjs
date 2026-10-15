@@ -28,8 +28,8 @@ export async function run(h) {
   const res = await page.request.get(BASE + '/lab/partcraft');
   const hd = res.headers();
   ok(hd['cross-origin-opener-policy'] === 'same-origin' && hd['cross-origin-embedder-policy'] === 'require-corp', `/lab/partcraft sends COOP ${hd['cross-origin-opener-policy']} and COEP ${hd['cross-origin-embedder-policy']}`);
-  const tryH = (await page.request.get(BASE + '/try/partcraft')).headers();
-  ok(!tryH['cross-origin-opener-policy'] && !tryH['cross-origin-embedder-policy'], '/try/partcraft (the release) sends neither');
+  const tryH = (await page.request.get(BASE + '/use/partcraft')).headers();
+  ok(!tryH['cross-origin-opener-policy'] && !tryH['cross-origin-embedder-policy'], '/use/partcraft (the release) sends neither');
   const iso = await pc(() => ({ coi: window.crossOriginIsolated, sab: typeof SharedArrayBuffer, hc: navigator.hardwareConcurrency }));
   ok(iso.coi === true && iso.sab === 'function', `the page is cross-origin isolated (crossOriginIsolated ${iso.coi}, SharedArrayBuffer available; ${iso.hc} logical processors)`);
   const assets = await pc(async () => {

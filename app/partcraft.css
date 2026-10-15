@@ -48,6 +48,7 @@
   position: absolute; z-index: 30; top: calc(100% + .25rem); left: 0; min-width: 15rem;
   display: flex; flex-direction: column; padding: .3rem;
   background: var(--sheet-2); border: var(--pen-2) solid var(--ink); border-radius: var(--radius);
+  max-height: calc(100vh - 9rem); overflow-y: auto;   /* a long menu scrolls instead of running off the window */
 }
 .pc-menu-right { left: auto; right: 0; min-width: 10rem; }
 .pc-menu-list .pc-menu-link { display: block; text-decoration: none; }
@@ -139,6 +140,17 @@ body.app-shell .sp-tab { bottom: 3rem; }
 .pc-list li:first-child { border-top: 0; }
 .pc-list .grow { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pc-list .is-bad { color: var(--layer-red); font-weight: 700; }
+/* where a parameter is used (0.5 WL.30): a quiet line under its row; the parameters a script reads */
+.pc-ptable tr.pc-puses td { padding-top: 0; font-size: var(--fs-sm, 0.875rem); }
+.pc-ptable tr.pc-puses .pc-linkbtn { font-size: inherit; }
+.cs-tab-note .is-bad { color: var(--layer-red); font-weight: 700; }
+/* the Features › More menu's group headings, and tools this kernel does not build, dimmed (they still say why on a click) (0.5 usability pass) */
+.pc-menu-h { padding: .15rem .5rem 0; font-size: .75rem; font-weight: 700; color: var(--ink-2); }
+.pc-menu-list [data-not-built] { opacity: .55; }
+/* interference results (0.5 WL.33): a result reads in full, its Hide link stays on one line */
+.pc-list[data-clashes] li { align-items: baseline; }
+.pc-list[data-clashes] li .grow { white-space: normal; overflow: visible; text-overflow: clip; }
+.pc-list[data-clashes] li .pc-linkbtn { white-space: nowrap; }
 .pc-list .pc-input { padding: .15rem .3rem; font-size: .8125rem; }
 .pc-list [data-body-name] { min-width: 0; }
 .pc-list li:has([data-body-name]) .pc-muted, .pc-list [data-body-hide] { white-space: nowrap; }
@@ -317,10 +329,10 @@ body.app-shell .sp-tab { bottom: 3rem; }
 .pc-sim-table .is-bad, .pc-props .is-bad { color: var(--layer-red); font-weight: 700; }
 /* Script workspace (ws-script.js, cs-editor.js, cs-dock.js; docs/apps/craftscript.md) */
 @media (min-width: 761px) {
-  .pc[data-active-workspace="script"] { grid-template-columns: 16rem minmax(0, 1fr) 30rem; }
+  .pc[data-active-workspace="script"], .pc[data-script-tab-open] { grid-template-columns: 16rem minmax(0, 1fr) 30rem; }
 }
 @media (min-width: 761px) and (max-width: 1100px) {
-  .pc[data-active-workspace="script"] { grid-template-columns: 13.5rem minmax(0, 1fr) 22rem; }
+  .pc[data-active-workspace="script"], .pc[data-script-tab-open] { grid-template-columns: 13.5rem minmax(0, 1fr) 22rem; }
 }
 .cs-panel { --cs-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; display: flex; flex-direction: column; gap: .5rem; }
 .cs-panel > .pc-tabs { margin: -.4rem -1rem .1rem; }
@@ -499,4 +511,25 @@ button.cs-shown-h:focus-visible { outline: var(--pen-2) solid var(--action); }
   .pc-tools [role="menu"] button, .pc-tools [role="menu"] [role^="menuitem"] { min-height: 2.75rem; }
   .pc-node { min-height: 2.5rem; }
   .pc-btn { min-height: 2.5rem; }
+}
+
+/* ---- Check for 3D printing (0.5 SG.4) ---- */
+.pc-print p, .pc-print ul { margin: 0 0 .6rem; }
+.pc-print ul { padding-left: 1.1rem; }
+.pc-print-verdict { font-weight: 700; }
+.pc-print-verdict[data-print-ok="1"] { color: var(--layer-green); }
+.pc-print-verdict[data-print-ok="0"], .pc-print-problems { color: var(--layer-red); }
+.pc-print-facts { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.pc-bed { flex-wrap: wrap; gap: .5rem; }
+.pc-bed input { width: 5rem; }
+
+/* File › Standard part (stdparts.js; 0.5 MQ.4) */
+.pc-std { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: .5rem 1rem; align-items: center; min-width: min(28rem, 80vw); }
+.pc-std .pc-muted { grid-column: 1 / -1; }
+
+/* One toolbar row at 1440 px (0.5 final sweep, `closing`): File › Standard part (MQ.4) grew the File group by 80 px and the
+   Design toolbar wrapped (groups 1489 px). Below 1600 px Standard part and Normal to show as their icons; the label stays in
+   the title and for screen readers (BimCraft's rule for its newest tools). Phones keep app-phone.js's icon rules. */
+@media (max-width: 1599.98px) {
+  .pc-tool[data-cmd="std-part"] > span, .pc-tool[data-cmd="view-normal"] > span { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 }

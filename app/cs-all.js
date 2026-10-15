@@ -13,7 +13,7 @@
 import { registerBuiltin, registerMethod, createRuntime } from './cs-runtime.js';
 import './cs-lang-craft.js';
 import './cs-lang-lua.js';           // builder B: registers 'lua' (wasmoon loads only when a Lua script runs)
-import './cs-lang-python.js';        // 0.4 P10: registers 'python' (Pyodide loads only when a Python script runs)
+import './cs-lang-python.js';        // 0.4 P10: registers 'python' (CPython for WASI loads only when a Python script runs; 0.5)
 import './cs-lib-core.js';
 import * as LINALG from './cs-lib-linalg.js';
 import * as MESH from './cs-lib-mesh.js';
@@ -22,7 +22,7 @@ import { has, init } from './i18n.js';
 
 // Node (the CLI, tests) has no page to read the language catalog from: English, from this build's lang/en.json, so messages
 // read as words. The browser's script worker gets the page's catalog instead (worker-i18n.js).
-if (typeof document === 'undefined' && typeof process !== 'undefined' && process.versions && process.versions.node && !has('cs.python.trust')) {
+if (typeof document === 'undefined' && typeof process !== 'undefined' && process.versions && process.versions.node && !has('cs.python.err.load')) {
   try {
     const fs = await import('node' + ':fs');
     init({ locale: 'en', strings: JSON.parse(fs.readFileSync(new URL('lang/en.json', import.meta.url), 'utf8')) });

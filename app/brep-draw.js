@@ -16,6 +16,7 @@ import * as V from './vec.js';
 import { regenerateBrep } from './brep.js';
 import { VIEWS, SECTION_TRACE } from './drawing.js';
 import { t as tr } from './i18n.js';
+import { threadNotes } from './threads.js';
 
 function arena() {
   const live = [];
@@ -149,7 +150,7 @@ export function drawingViews(part, oc, drawing = {}) {
       views.section = { visible: v.visible, hidden: [], cut: cutSegs, box: boxOf(v.visible.concat(cutSegs)), of: sec.of, at, trace: { view: traceView, p: p0, d: d2, sight, box: tb } };
     }
     // tapped holes (cosmetic threads): their callouts go on the sheet as notes
-    const threads = [...(r.threads || new Map()).values()].map((t) => ({ callout: t.callout, count: t.list.length }));
+    const threads = threadNotes(r.threads);
     return { views, exact: true, bbox: { min, max }, threads };
   } finally {
     T.free();

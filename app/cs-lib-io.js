@@ -11,9 +11,11 @@
  *                            headers = cell of names), .json (§2 JSON), .npy (tensor, Fortran order), .h5 (a struct is written
  *                            as the file's top level; anything else as /value).
  *   files() → cell of names · part() / bodies() → the open PartCraft part / its bodies as model values (when the host gives them)
+ *   param(name) → the part's parameter's value (mm, degrees or a plain number) · params() → a struct of them all (0.5 WL.30;
+ *                            read only; the Parameters table lists the scripts that call them, params-uses.js)
  *
  * Where files come from: an io host set with setIoHost({ readFile(name) → Uint8Array | null, writeFile(name, bytes, mime),
- * listFiles() → [names], part() → model | null, bodies() → [model] }). Node default (CLI, tests): the real file system,
+ * listFiles() → [names], part() → model | null, bodies() → [model], params() → { name: number } }). Node default (CLI, tests): the real file system,
  * relative to process.cwd() (or setIoHost(nodeFs(dir))). The script worker: an in-memory store of the files the page handed
  * over (memoryFs()); saved files go back to the page as downloads. Untrusted input: every reader checks sizes and counts.
  *
@@ -41,10 +43,11 @@ const cell = (items) => ({ t: 'cell', shape: [items.length ? 1 : 0, items.length
 // ─────────────────────────────────────────────────────────────── vendored libraries (one place for every URL)
 /** Paths are written with /current/ so bin/release-app.php pins them to the version of the day. */
 export const VENDOR = {
-  h5wasm: '/assets/vendor/h5wasm/0.10.3/hdf5_hl.js',
-  wasmoonJs: '/assets/vendor/wasmoon/1.16.0/index.js',
-  wasmoonWasm: '/assets/vendor/wasmoon/1.16.0/glue.wasm',
-  pyodideJs: '/assets/vendor/pyodide/314.0.7/pyodide.mjs',   // 0.4 P10 (the folder is its indexURL)
+  h5wasm: '/assets/vendor/h5wasm/current/hdf5_hl.js',
+  wasmoonJs: '/assets/vendor/wasmoon/current/index.js',
+  wasmoonWasm: '/assets/vendor/wasmoon/current/glue.wasm',
+  cpythonWasm: '/assets/vendor/cpython-wasi/current/python.wasm',          // Python (0.5: CPython for WASI, cs-lang-python.js)
+  cpythonStdlib: '/assets/vendor/cpython-wasi/current/python-stdlib.zip',
 };
 const VENDOR_OVERRIDE = {};
 /** The page (or worker) can hand over exact URLs: setVendorUrls({ h5wasm, wasmoonJs, wasmoonWasm }). */
@@ -82,7 +85,7 @@ let HOST = null;
 export function setIoHost(h) { HOST = h; }
 export const getIoHost = () => HOST || (NODE ? (HOST = nodeFs()) : null);
 /** In-memory files (the script worker): put(name, bytes), get(name), plus the host interface. */
-export function memoryFs({ onWrite = null, part = null, bodies = null } = {}) {
+export function memoryFs({ onWrite = null, part = null, bodies = null, params = null } = {}) {
   const files = new Map();
   return {
     files,
@@ -92,10 +95,11 @@ export function memoryFs({ onWrite = null, part = null, bodies = null } = {}) {
     listFiles: () => [...files.keys()],
     part: () => (typeof part === 'function' ? part() : part),
     bodies: () => (typeof bodies === 'function' ? bodies() : bodies || []),
+    params: () => (typeof params === 'function' ? params() : params || {}),
   };
 }
 /** Node: real files under `dir` (default the working directory). */
-export function nodeFs(dir = null, { part = null, bodies = null } = {}) {
+export function nodeFs(dir = null, { part = null, bodies = null, params = null } = {}) {
   let fs = null, path = null;
   const need = () => { if (!fs) { fs = process.getBuiltinModule('fs'); path = process.getBuiltinModule('path'); } };
   const full = (name) => { need(); return path.resolve(dir || process.cwd(), name); };
@@ -105,6 +109,7 @@ export function nodeFs(dir = null, { part = null, bodies = null } = {}) {
     listFiles() { need(); try { return fs.readdirSync(dir || process.cwd()).filter((f) => /\.(stl|obj|csv|json|npy|h5|hdf5)$/i.test(f)); } catch { return []; } },
     part: () => (typeof part === 'function' ? part() : part),
     bodies: () => (typeof bodies === 'function' ? bodies() : bodies || []),
+    params: () => (typeof params === 'function' ? params() : params || {}),
   };
 }
 function cleanName(name) {
@@ -519,7 +524,20 @@ export const BUILTINS = {
   files: [() => { const h = getIoHost(); return cell(h && h.listFiles ? h.listFiles() : []); }, 'c = files()'],
   part: [() => { const h = getIoHost(), p = h && h.part ? h.part() : null; if (!p) throw err(t('script.io.no_part')); return p; }, 'm = part()'],
   bodies: [() => { const h = getIoHost(), b = h && h.bodies ? h.bodies() : []; return cell(b || []); }, 'c = bodies()'],
+  param: [(a) => {
+    if (typeof a[0] !== 'string') throw err(t('script.io.param_text'));
+    const name = a[0], all = partParams();
+    if (!Object.hasOwn(all, name)) throw err(Object.keys(all).length ? t('script.io.no_param', { name, list: Object.keys(all).join(', ') }) : t('script.io.no_params', { name }));
+    return all[name];
+  }, 'v = param(name)'],
+  params: [() => { const all = partParams(), fields = {}; for (const k of Object.keys(all)) fields[k] = all[k]; return { t: 'struct', fields }; }, 's = params()'],
 };
+/** The part's parameters with a value, as { name: number } (no host, or no part: none). */
+function partParams() {
+  const h = getIoHost(), raw = h && h.params ? h.params() : null, out = {};
+  if (raw && typeof raw === 'object') for (const [k, v] of Object.entries(raw)) if (/^[A-Za-z_][A-Za-z0-9_]{0,39}$/.test(k) && typeof v === 'number' && Number.isFinite(v)) out[k] = v;
+  return out;
+}
 /**
  * Register every builtin with cs-runtime.js. Runs once when this module is imported; calling
  * it again (or with another registry) is harmless. A name another module registered first is skipped (listed in `skipped`).

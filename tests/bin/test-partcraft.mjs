@@ -1242,8 +1242,13 @@ await (await import(path.join(REPO, 'tools/partcraft-test/test-workspaces.mjs'))
 await (await import(path.join(REPO, 'tools/partcraft-test/test-design-features.mjs'))).runDesignFeatureTests({ ok, section, oc, skip, M });
 await (await import(path.join(REPO, 'tools/partcraft-test/test-sheetmetal.mjs'))).runSheetMetalTests({ ok, section, oc, skip });   // 0.4 P15–P17
 await (await import(path.join(REPO, 'tools/partcraft-test/test-configs.mjs'))).runConfigTests({ ok, section });   // 0.4 P18
+await (await import(path.join(REPO, 'tools/partcraft-test/test-stdparts.mjs'))).runStdPartsTests({ ok, section, M });   // 0.5 MQ.4
 await (await import(path.join(REPO, 'tools/partcraft-test/test-joints.mjs'))).runJointTests({ ok, section, M });   // 0.4 P19
 await (await import(path.join(REPO, 'tools/partcraft-test/test-rib.mjs'))).runRibTests({ ok, section, oc });   // 0.4 P20
+await (await import(path.join(REPO, 'tools/partcraft-test/test-screw-threads.mjs'))).runScrewThreadTests({ ok, section, oc, M, skip });   // 0.5 WL.29
+await (await import(path.join(REPO, 'tools/partcraft-test/test-param-uses.mjs'))).runParamUsesTests({ ok, section });   // 0.5 WL.30
+await (await import(path.join(REPO, 'tools/partcraft-test/test-ifc-export.mjs'))).runIfcExportTests({ ok, section, skip, keep: KEEP });   // 0.5 WL.32
+await (await import(path.join(REPO, 'tools/partcraft-test/test-clash-filters.mjs'))).runClashFilterTests({ ok, section, M });   // 0.5 WL.33
 await (await import(path.join(REPO, 'tools/partcraft-test/test-analysis.mjs'))).runAnalysisTests({ ok, section, M, oc });   // 0.4 P21
 await (await import(path.join(REPO, 'tools/partcraft-test/test-python.mjs'))).runPythonTests({ ok, section, skip });   // 0.4 P10
 await (await import(path.join(REPO, 'tools/partcraft-test/test-holetable.mjs'))).runHoleTableTests({ ok, section, oc, skip });   // 0.4 P23
@@ -1297,6 +1302,37 @@ section('kernel hygiene');
   const cut = P.addFeature(bad, 'extrude', { sketch: s1.id, op: 'cut', end: 'through' });
   const rb = build(bad);
   ok(rb.results.get(cut.id).status === 'error' && /nothing to cut/i.test(rb.results.get(cut.id).message) && rb.stats === null, 'a cut with no body is an error, not a crash');
+}
+
+// 3D printing (0.5 SG.4, #531): print3d.js is ModelCraft's, copied byte for byte; the same known answers on this copy,
+// then real parts from the mesh kernel turned Z up as the exports write them
+{
+  const canon = path.join(DEV, '../../modelcraft/dev/print3d.js');
+  if (fs.existsSync(canon)) ok(fs.readFileSync(path.join(DEV, 'print3d.js')).equals(fs.readFileSync(canon)), 'partcraft print3d.js is byte-identical to modelcraft/dev/print3d.js');
+  else skip('print3d.js copy: ModelCraft is not in this checkout');
+  const shared = path.join(REPO, 'tools/modelcraft-test/print3d.mjs');
+  if (fs.existsSync(shared)) {
+    const { run } = await import(shared);
+    await run({ ok, close: (a, b, t = 1e-6) => Math.abs(a - b) <= t, section, APP: DEV.replace(/\/$/, ''), OUT: TMP, ROOT: REPO });
+  } else skip('tools/modelcraft-test/print3d.mjs missing');
+  section('3D printing: real parts (0.5 SG.4)');
+  const PR = await import(DEV + 'print3d.js');
+  const zUpMesh = (m) => { const S3 = m.positions, pos = new Float64Array(S3.length); for (let i = 0; i < S3.length; i += 3) { pos[i] = S3[i]; pos[i + 1] = -S3[i + 2]; pos[i + 2] = S3[i + 1]; } return { positions: pos, indices: m.indices, colors: null }; };
+  const { part, s1, e1 } = blockPart();
+  let r = build(part);
+  let c = PR.printCheck(zUpMesh(r.mesh));
+  ok(c.ok && c.shells === 1 && rel(c.volume, 100000, 1e-6) && rel(c.volume, r.stats.volume, 1e-6), 'a 100 × 50 × 20 block is ready to print: ' + c.volume);
+  ok(near(c.size[2], 20, 1e-4) && near(c.min[2], 0, 1e-4) && rel(c.bedArea, 5000, 1e-6) && !c.warnings.length, 'Y up becomes Z up: 20 tall, resting on its 5000 mm² base, no warning');
+  ok(c.warnings.length === 0 && PR.printCheck(zUpMesh(r.mesh), { bed: [80, 120, 100] }).warnings.some((w) => w.kind === 'bed') === false, 'fits a 80 × 120 bed turned 90°');
+  ok(PR.printCheck(zUpMesh(r.mesh), { bed: [80, 80, 100] }).warnings.some((w) => w.kind === 'bed'), 'not a 80 × 80 bed');
+  const sk = S.newSketch(); S.addRect(sk, [10, 10], [30, 20]);
+  const s2 = P.addFeature(part, 'sketch', { plane: { kind: 'face', feature: e1.id, face: 'end' }, sketch: sk });
+  P.addFeature(part, 'extrude', { sketch: s2.id, op: 'cut', end: 'through' });
+  r = build(part); c = PR.printCheck(zUpMesh(r.mesh));
+  ok(c.ok && rel(c.volume, 96000, 1e-6), 'with a slot cut through: still one closed body, 96000 mm³');
+  const stl = X.stlBinary(r.mesh, 'p'), back = PR.weld({ positions: Float64Array.from(stlTris(stl)), indices: Uint32Array.from({ length: stlTris(stl).length / 3 }, (_, i) => i) });
+  ok(PR.printCheck(back).ok, "PartCraft's own STL export passes the check too");
+  function stlTris(b) { const dv = new DataView(b.buffer, b.byteOffset), n = dv.getUint32(80, true), out = []; for (let t = 0; t < n; t++) for (let v = 0; v < 3; v++) for (let k3 = 0; k3 < 3; k3++) out.push(dv.getFloat32(84 + t * 50 + 12 + v * 12 + k3 * 4, true)); return out; }
 }
 
 if (process.argv.includes('--browser')) {

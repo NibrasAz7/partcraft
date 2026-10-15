@@ -110,7 +110,7 @@ export async function runJointTests({ ok, section, M }) {
     const s = setup('pinslot', { slotDir: 15, slide: 2 });
     ok(A.readAssembly(A.toJSON(s.asm)).joints[0].slotDir === 15, 'the slot direction is kept');
     const bad = (mut) => { const j = JSON.parse(txt); mut(j); try { A.readAssembly(JSON.stringify(j)); return ''; } catch (e) { return e.message; } };
-    ok(/bad value/.test(bad((j) => { j.joints[0].dx = 'far'; })) && /name a value/.test(bad((j) => { j.joints[0].limits = { tiltX: { min: 0, max: 1 } }; })) && /unknown kind/.test(bad((j) => { j.joints[0].type = 'hinge'; })) && /newer PartCraft/.test(bad((j) => { j.version = 4; })), 'tampered: a value that is not a number, a limit on a value the joint lacks, an unknown type, version 4');
+    ok(/bad value/.test(bad((j) => { j.joints[0].dx = 'far'; })) && /name a value/.test(bad((j) => { j.joints[0].limits = { tiltX: { min: 0, max: 1 } }; })) && /unknown kind/.test(bad((j) => { j.joints[0].type = 'hinge'; })) && /newer PartCraft/.test(bad((j) => { j.version = A.VERSION + 1; })), 'tampered: a value that is not a number, a limit on a value the joint lacks, an unknown type, a newer version');
   }
 }
 

@@ -3,7 +3,7 @@ title: File formats
 summary: Every file PartCraft reads and writes, with extensions, units, axes and what each one keeps or loses.
 section: reference
 order: 40
-keywords: formats, file types, extensions, partcraft.json, partcraft-asm.json, stl, 3mf, step, stp, ap242, dxf, r12, pdf, gltf, obj, iges, units, z up
+keywords: formats, file types, extensions, ifc, bim, partcraft.json, partcraft-asm.json, stl, 3mf, step, stp, ap242, dxf, r12, pdf, gltf, obj, iges, units, z up
 ---
 
 | Format | Extension | Open | Save or export | Units | Up axis | Keeps |
@@ -17,6 +17,7 @@ keywords: formats, file types, extensions, partcraft.json, partcraft-asm.json, s
 | STEP AP214, exact | `.step` | | {{ui:STEP AP214 (exact solid)}} | mm | Z | Not built yet in this version (needs an exact kernel) |
 | STEP AP242, faceted | `.step` | | {{ui:STEP (faceted, mesh kernel)}} | mm | Y | A closed solid of flat faces: round surfaces as facets. The STEP to use in this version |
 | STEP AP214, faceted | `.step` | | {{ui:STEP AP214 (faceted, mesh kernel)}} | mm | Y | The same solid in the older AP214 schema, for programs that read only that |
+| IFC 4 | `.ifc` | No | {{ui:IFC 4 (with every property)}} | mm | Z | The shape as triangles, the material, every parameter, the title block, quantities; an assembly's parts as types and its copies placed |
 | DXF R12, sketch | `.dxf` | No | {{ui:DXF of the sketch or flat face}} with a sketch selected | mm | Sketch's own x, y | Lines, true arcs and circles, points; layers PROFILE, CONSTRUCTION, POINTS |
 | DXF R12, face | `.dxf` | No | {{ui:DXF of the sketch or flat face}} with a flat face picked | mm | Face's own x, y | The face's outlines as closed polylines (round edges as facets) |
 | PDF drawing | `.pdf` | No | {{ui:Drawing (PDF): views, section, detail, GD&T}} | mm on an A3 sheet | | Front, top, right, isometric, section and detail views drawn from facets, hidden lines, overall sizes, GD&T symbols, title block |

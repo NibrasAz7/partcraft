@@ -284,9 +284,16 @@ e3 = max(abs(r3.ux(2, 2:ny-1) - ua)) / max(ua); s3 = r3.steps; c3 = r3.converged
 
   // ───────────────────────────────────────────────────────────── the examples
   section('Library: examples run');
-  for (const ex of ['example_cantilever', 'example_mbb', 'example_capacitor', 'example_channel']) {
+  for (const ex of ['example_cantilever', 'example_mbb', 'example_capacitor', 'example_channel', 'example_electromagnet']) {
     const w = await craft(ex, fs.readFileSync(path.join(LIB, ex + '.craft'), 'utf8'));
     if (w) ok(w.displays.some((d) => d.show === 'field') && w.displays.some((d) => d.plot), `${ex} runs: a field on the canvas and a plot (${(w.ms / 1000).toFixed(1)} s)`);
+    // 0.5 SG.7 (#573): the electromagnet against the magnetic circuit, B_gap = μ0 N I / (g + l/μr); FEM a little lower
+    // (fringing widens the gap's flux path, some flux leaks across the window); the inductance higher (leakage)
+    if (w && ex === 'example_electromagnet') {
+      const e = w.num('Bgap') / w.num('Bc') - 1;
+      ok(e < 0 && e > -0.05, `example_electromagnet: B in the gap ${f(w.num('Bgap'), 4)} T vs the magnetic circuit ${f(w.num('Bc'), 4)} T (${f(100 * e, 2)} %, within −5 %)`);
+      ok(w.num('L') > w.num('Lc') && w.num('L') < 2 * w.num('Lc') && Math.abs(w.num('F') - w.num('Bgap') ** 2 * 0.02 / (2 * 4e-7 * Math.PI)) < 1e-6 * w.num('F'), `example_electromagnet: inductance ${f(w.num('L'), 4)} H/m above the circuit's ${f(w.num('Lc'), 4)} H/m (leakage), pull ${f(w.num('F'), 0)} N/m = B² w / 2μ0`);
+    }
   }
 
   console.log('\n  timings (Node, one thread): ' + times.map(([l, ms]) => `${l} ${(ms / 1000).toFixed(2)} s`).join(' · ') + ` — library section ${((Date.now() - tAll) / 1000).toFixed(1)} s`);

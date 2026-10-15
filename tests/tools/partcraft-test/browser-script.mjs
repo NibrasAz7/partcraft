@@ -199,6 +199,22 @@ export async function run(h) {
     await page.waitForTimeout(300);
     await shot('06b-library-example');
   }
+  if (lib.items.includes('example_electromagnet')) {   // 0.5 SG.7 (#573): the magnetostatics tutorial's example, in the worker
+    console.log('\n== the electromagnet example (0.5 SG.7: magnetostatic2d → B, gap field, inductance, pull)');
+    await page.click('[data-cs-pane="lib"]');
+    await page.click('[data-cs-lib="example_electromagnet"]');
+    await page.waitForFunction(() => /Electromagnet/.test(document.querySelector('[data-cs-lib-doc]')?.textContent || '') && !document.querySelector('[data-cs-lib-open]').disabled, null, { timeout: 10000 });
+    await page.click('[data-cs-lib-open]');
+    await runF5();
+    out = await consoleText();
+    const bm = out.match(/B in the gap ([0-9.]+) T; magnetic circuit ([0-9.]+) T/);
+    ok(bm && Number(bm[1]) / Number(bm[2]) > 0.95 && Number(bm[1]) < Number(bm[2]) && /pull across the gap/.test(out) && /Done in/.test(out.slice(-400)), `example_electromagnet runs from the library with F5: ${bm ? bm[0] : out.slice(-300)}`);
+    const emDock = await page.evaluate(() => [...document.querySelectorAll('.cs-dock-tab')].map((t) => t.textContent.trim()));
+    ok(emDock.some((t) => /Electromagnet: B_y/.test(t)), `its B_y plot is in the dock (${emDock.join(', ')})`);
+    await page.click('.pc-tools [data-cmd="view-fit"]');
+    await page.waitForTimeout(300);
+    await shot('06c-electromagnet');
+  }
   await page.click('[data-cs-pane="editor"]');
 
   console.log('\n== files: drop a script and a data file, open a script, save a script');

@@ -22,6 +22,10 @@ A radius or diameter must be more than zero, and an angle is between 0 and 180 d
 Which box is which? The boxes are listed in the order the dimensions were made. If you are not sure, open the sketch (double-click it), double-click the dimension on the canvas, and change it there.
 :::
 
+## Type the main number straight away
+
+Select a feature in the history (or just add it) and type a number: it goes into the feature's main box, the one you change most (an Extrude's **Depth**, a Revolve's **Angle**, a Hole's **Diameter**, a pattern's **Count**, a Fillet's **Radius**, a Shell's wall). Press {{key:Enter}} to set it, or {{key:Esc}} to keep the old one. Adding an Extrude says so in the status bar: "Extrude1 added. Change its numbers on the right, or type a number now for its depth."
+
 ## The numbers that drive a part
 
 | Where | What you can change |

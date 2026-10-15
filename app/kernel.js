@@ -27,7 +27,8 @@ import { builtCount, dependsOn, EXACT_ONLY, FEATURE_LABELS } from './part.js';
 import { refName, findEdge, findFace } from './brep.js';
 import { refFeature } from './refgeom.js';
 import { regionsAt } from './brep-design.js';
-import { ISO_COARSE } from './design-features.js';
+import { ISO_COARSE, threadCallout as holeCallout } from './design-features.js';
+import { threadTool, threadDims, sizeFor, threadCallout, DEFAULT_CLEARANCE } from './threads.js';
 import { t } from './i18n.js';
 import * as MF from './meshfaces.js';
 
@@ -353,6 +354,79 @@ function draftTools(f, ctx) {
   return { tools };
 }
 
+/**
+ * Threads on picked round faces (0.5 WL.29). Each face: a cylinder of the body as it is now (named faces, K.2b); outside of
+ * the material = a shaft (external thread), inside = a bore (internal). It runs from the face's open end (the end where the
+ * part does not carry on along the axis; Flip: the other end) for `length` (null: the whole face). Modelled: a bore is cut
+ * by the mating bolt's shape, a shaft by a tube less the bolt's shape (threads.js threadTool), carried one pitch past an open
+ * end. Cosmetic: no geometry, only ctx.threads (dashed circles in the view, the callout on the drawing).
+ */
+function threadFeature(f, ctx) {
+  if (!ctx.body) fail(t('thread.err.no_body'));
+  if (!f.faces.length) fail(t('thread.err.pick'));
+  const B = bodyFaces(ctx);
+  const P = B.mesh.positions, I = B.mesh.indices, res = Math.max(48, ctx.part.resolution || 64);
+  const tools = [], list = [], warnings = [];
+  // is q inside the body? (a small cube about it keeps some of its volume)
+  const inside = (q, s) => { const c = ctx.T(ctx.T(ctx.M.Manifold.cube([s, s, s], true)).translate(q)); return ctx.T(ctx.body.intersect(c)).volume() > 0.05 * s * s * s; };
+  f.faces.forEach((ref, i) => {
+    const fi = findFace(B.faces, ref);
+    if (fi < 0) fail(t('thread.err.face_gone', { face: ref.name }));
+    const fc = B.faces[fi];
+    if (fc.type !== 'cylinder') fail(t('thread.err.round'));
+    const o = fc.axis.o, d = V.norm(fc.axis.d), r = fc.r;
+    // its extent along the axis, and which side the material is on (the triangles' normals point out of it)
+    let t0 = Infinity, t1 = -Infinity, out = 0;
+    for (let ti = 0; ti < I.length / 3; ti++) {
+      if (B.triFace[ti] !== fi) continue;
+      const q = [0, 1, 2].map((k) => [P[I[ti * 3 + k] * 3], P[I[ti * 3 + k] * 3 + 1], P[I[ti * 3 + k] * 3 + 2]]);
+      for (const p of q) { const h = V.dot(V.sub(p, o), d); t0 = Math.min(t0, h); t1 = Math.max(t1, h); }
+      const c = V.mul(V.add(V.add(q[0], q[1]), q[2]), 1 / 3), n = V.cross(V.sub(q[1], q[0]), V.sub(q[2], q[0]));
+      const v = V.sub(c, o), rad = V.sub(v, V.mul(d, V.dot(v, d)));
+      out += V.dot(n, rad) / Math.max(1e-30, V.len(rad));
+    }
+    if (!(t1 > t0)) fail(t('thread.err.round'));
+    const external = out > 0;
+    const size = f.size === 'auto' ? sizeFor(f.form, 2 * r, external) : f.size;
+    if (!size) fail(t('thread.err.no_size', { d: fmtMm(2 * r) }));
+    const g = threadDims(f.form, size);
+    if (f.size !== 'auto') {
+      // a size that does not fit the face: said, built anyway (the thread is cut to the face)
+      const want = external ? g.d : g.d1;
+      if (Math.abs(2 * r - want) > 0.12 * want) warnings.push(t(external ? 'thread.warn.shaft' : 'thread.warn.bore', { d: fmtMm(2 * r), size, want: fmtMm(want) }));
+    }
+    // open ends: the part does not carry on along the axis just past them
+    const dl = Math.min(0.5 * g.p, 0.25 * r), s = Math.min(dl, 0.25 * r);
+    const open0 = !inside(V.add(o, V.mul(d, t0 - dl)), s), open1 = !inside(V.add(o, V.mul(d, t1 + dl)), s);
+    let fromHi = open1 && !open0;
+    if (f.flip) fromHi = !fromHi;
+    const full = t1 - t0;
+    let len = f.length === null || f.length === undefined ? full : f.length;
+    if (len > full + 1e-6) { warnings.push(t('thread.warn.long', { length: fmtMm(len), full: fmtMm(full) })); len = full; }
+    const dz = fromHi ? V.mul(d, -1) : d, origin = V.add(o, V.mul(d, fromHi ? t1 : t0));
+    const startOpen = fromHi ? open1 : open0, endOpen = fromHi ? open0 : open1;
+    const ext0 = startOpen ? g.p : 0, ext1 = endOpen && len >= full - 1e-6 ? g.p : 0;
+    const c = f.modelled ? f.clearance ?? DEFAULT_CLEARANCE : 0;
+    const through = !external && open0 && open1 && len >= full - 1e-6;
+    list.push({ o: origin, d: dz, r: external ? g.d1 / 2 : g.d / 2, r0: Math.min(g.d1 / 2, r), r1: Math.max(g.d / 2, external ? r : 0), depth: len, callout: threadCallout(f.form, size, { external, length: len, through, modelled: f.modelled }) });
+    if (!f.modelled) return;
+    // a shaft's groove: a tube just outside the shaft's facets (a wider one leaves a ring on the shoulder it ends at)
+    const local = threadTool(ctx.M, ctx.T, { form: f.form, size, external, len, clearance: c, hand: f.hand, segments: res, outer: (Math.max(r, g.d / 2) + 1e-4 * r) / Math.cos(Math.PI / res), ext0, ext1, face: { r, segments: ctx.part.resolution || 64 } });
+    const X = V.norm(Math.abs(dz[0]) < 0.9 ? V.cross(dz, [1, 0, 0]) : V.cross(dz, [0, 1, 0])), Y = V.cross(dz, X);
+    const m = ctx.T(local.transform(V.basisMatrix(X, Y, dz, origin)));
+    const shift = external ? -c : c, nm = (k) => `${f.id}.${k}:${i}`;   // i18n-ignore: face names (identifiers)
+    const surfs = [MF.thread(nm('thread'), origin, dz, g.d1 / 2 + shift, g.d / 2 + shift, -ext0, len + ext1)];
+    if (!ext1) surfs.push(MF.within(MF.plane(nm('tend'), dz, V.add(origin, V.mul(dz, len))), origin, dz, Math.max(r, g.d / 2) * 1.01 + 1e-3));
+    tools.push({ m, op: 'cut', surfs });
+  });
+  // the callouts, one per size (a drawing note each)
+  const callouts = [];
+  for (const th of list) { const k = callouts.find((x) => x.callout === th.callout); if (k) k.count++; else callouts.push({ callout: th.callout, count: 1 }); }
+  ctx.threads.set(f.id, { callout: callouts[0].callout, callouts, modelled: !!f.modelled, list });
+  return { tools, ...(warnings.length ? { warning: warnings.join(' ') } : {}) };
+}
+const fmtMm = (v) => String(+Number(v).toFixed(2));
+
 const FEATURES = {
   draft(f, ctx) { return draftTools(f, ctx); },
   shell(f, ctx) { return shellTools(f, ctx); },
@@ -549,9 +623,25 @@ const FEATURES = {
         parts.push(ctx.T(ctx.T(disk(f.cboreD / 2, p.x, p.y).extrude(f.cboreDepth)).translate([0, 0, cz])));
       }
     }
+    // a tapped hole's thread (0.5 WL.29): modelled = the mating bolt's shape cut along the thread depth, else cosmetic
+    const thLen = thread ? Math.min(depth, f.threadDepth || depth) : 0;
+    if (thread && f.modelled) {
+      const g = threadDims('iso', f.size);
+      if (!g) fail(t('model.kernel.thread_size'));
+      const cut = threadTool(ctx.M, ctx.T, { form: 'iso', size: f.size, external: false, len: thLen, clearance: f.clearance ?? DEFAULT_CLEARANCE, segments: Math.max(48, res), face: { r: hd / 2, segments: res } });
+      // its +z axis into the material: turned half round x when the hole goes down (a turn, not a mirror: the hand stays)
+      const down = sign < 0 ? ctx.T(cut.rotate([180, 0, 0])) : cut;
+      for (const p of pts) parts.push(ctx.T(down.translate([p.x, p.y, 0])));
+    }
     const local = parts.length === 1 ? parts[0] : ctx.T(ctx.M.Manifold.union(parts));
     const tool = ctx.T(local.transform(V.frameMatrix(frame)));
     ctx.holeAxes.set(f.id, pts.map((p) => ({ o: V.toWorld(frame, p.x, p.y), d: V.mul(frame.n, -sign) })));
+    if (thread) {
+      // d: into the material, as brep.js writes it
+      ctx.threads.set(f.id, { callout: holeCallout(f), modelled: !!f.modelled,
+        list: pts.map((p) => ({ o: V.toWorld(frame, p.x, p.y), d: V.mul(frame.n, sign), r: thread[0] / 2, depth: f.threadDepth || (f.through ? depth - 1 : depth),
+          r0: Math.min(thread[2], thread[0] - 1.082532 * thread[1]) / 2, r1: thread[0] / 2 })) });   // r0–r1: the thread's zone (minor–major; assembly.js)
+    }
     // its surfaces (K.2b), per point as brep.js names them: wall, floor, counterbore + its floor, countersink cone
     const din = V.mul(frame.n, sign), surfs = [];
     for (const p of pts) {
@@ -565,9 +655,16 @@ const FEATURES = {
         const R = f.csinkD / 2, r = f.d / 2, hc = (R - r) / Math.tan(f.csinkAngle * Math.PI / 360);
         surfs.push(own(MF.cone(nm('csink'), V.add(P0, V.mul(din, R * hc / (R - r))), V.mul(din, -1), (R - r) / hc)));
       }
+      if (thread && f.modelled) {
+        const g = threadDims('iso', f.size), c = f.clearance ?? DEFAULT_CLEARANCE;
+        surfs.push(MF.thread(nm('thread'), P0, din, g.d1 / 2 + c, g.d / 2 + c, 0, thLen));
+        if (thLen < depth - 1e-9) surfs.push(own(MF.plane(nm('tend'), din, V.add(P0, V.mul(din, thLen)))));
+      }
     }
     return { tools: [{ m: tool, op: 'cut', surfs }], count: pts.length };
   },
+
+  thread(f, ctx) { return threadFeature(f, ctx); },
 
   lpattern(f, ctx) {
     if (f.bodies?.length) fail(t('kernel.mesh.pattern_bodies'));
@@ -648,7 +745,7 @@ export function regenerate(part, M, { upTo = null } = {}) {
   const ctx = {
     part, M, body: null,
     T: (m) => { live.push(m); return m; },
-    results: new Map(), frames: new Map(), candidates: new Map(), axes: new Map(), holeAxes: new Map(), tools: new Map(), refGeom: new Map(),
+    results: new Map(), frames: new Map(), candidates: new Map(), axes: new Map(), holeAxes: new Map(), tools: new Map(), refGeom: new Map(), threads: new Map(),
   };
   const origin = new Map();   // manifold original id → feature id
   const toolSurfs = new Map();   // manifold original id → that tool's named surfaces (meshfaces.js, K.2b)
@@ -749,7 +846,9 @@ export function regenerate(part, M, { upTo = null } = {}) {
   for (const m of live) { try { m.delete(); } catch { /* already gone */ } }
   // sketch lines in world space (for reference picking and display)
   // faces / edges: brep.js's tables from the mesh (meshfaces.js), so the workspaces and picking read either kernel's result
-  return { results: ctx.results, mesh, stats, frames: ctx.frames, candidates: ctx.candidates, axes: ctx.axes, holeAxes: ctx.holeAxes, refGeom: ctx.refGeom, faces, edges, named: !!faces };
+  // threads (cosmetic and modelled) of features that built: dashed circles in the view, callouts on the drawing
+  for (const id of [...ctx.threads.keys()]) if (ctx.results.get(id)?.status !== 'ok') ctx.threads.delete(id);
+  return { results: ctx.results, mesh, stats, frames: ctx.frames, candidates: ctx.candidates, axes: ctx.axes, holeAxes: ctx.holeAxes, refGeom: ctx.refGeom, faces, edges, named: !!faces, threads: ctx.threads };
 }
 
 // a blocking feature's status → the message key ("Needs Extrude1, which is failing.")

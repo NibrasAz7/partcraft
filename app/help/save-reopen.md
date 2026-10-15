@@ -57,4 +57,4 @@ See [Where your files go](common:your-files) for where downloads go on each syst
 
 - Save before closing the tab, reloading, or letting the computer sleep for long. The browser asks "Leave site?" if you try to close with unsaved changes, but a crash or a closed laptop gives no warning.
 - Private or incognito windows work, but nothing else is different: the file is still the only copy.
-- Cloud saving and version history are not available yet. Desktop builds are not out yet either.
+- Cloud saving and version history are not available yet.

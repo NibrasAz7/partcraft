@@ -3,7 +3,7 @@ title: Check an assembly for clashes and motion
 summary: Find parts that overlap with Clash, drag any joint's values to watch the motion, and sweep a joint through its range to find where parts collide.
 section: tasks
 order: 120
-keywords: interference, interference detection, clash, collision, overlap, motion, motion study, sweep, range of motion, check
+keywords: interference, interference detection, clash, collision, overlap, thread fit, thread depth mismatch, touching faces, hide, filter, motion, motion study, sweep, range of motion, check
 ---
 
 Two checks run on the parts as they are placed: **Clash** looks for overlapping material right now, and the **motion check** moves one joint through its range and looks for overlaps along the way.
@@ -16,13 +16,28 @@ Two checks run on the parts as they are placed: **Clash** looks for overlapping 
 The status bar reports the result:
 
 - "No interference between 3 parts (40 ms)." Nothing overlaps.
-- "Interference: Flange1 and Flange2 overlap by 2.5 mm³." Each overlapping pair, with the volume of the overlap.
+- "Interference: Flange1 and Flange2: Overlap, 2.5 mm³." Each pair, what kind of result it is and the volume they share.
 
-The **Assembly** box on the left shows **Interference**: "None", "1 pair overlap", or "Not checked". With nothing selected, the right panel lists each overlapping pair and its volume.
+The **Assembly** box on the left shows **Interference**: "None", "2 results" (the ones shown), or "Not checked". With nothing selected, the right panel lists each result under **Interference**.
 
-The result is cleared whenever the assembly changes. Run {{ui:Clash}} again after moving a joint.
+The result is cleared whenever the assembly changes. Run {{ui:Clash}} again after moving a joint. Every pair of parts is checked against every other, so large assemblies take longer.
 
-Touching faces (parts face to face) are not a clash; only shared volume is. Every pair of parts is checked against every other, so large assemblies take longer.
+### Kinds of results
+
+| Kind | Means |
+|---|---|
+| **Overlap** | The parts share volume: a real clash. |
+| **Thread depth mismatch** | The shared volume is inside one part's thread but beyond the other's: a bolt threaded deeper than its hole, or a plain shank in a tapped hole. |
+| **Thread fit (cosmetic threads)** | The shared volume is inside both parts' threads: a bolt in a tapped hole. Cosmetic threads are drawn at the thread's full size, so they always overlap a little. |
+| **Touching faces** | No shared volume, but faces in contact (within 0.001 mm). |
+
+Modelled threads (see [Threads on shafts and bores, drawn or modelled](topic:threads)) are real geometry: what they share is an **Overlap**.
+
+### Hide what you do not need to see
+
+Under **Interference**, **Show** has a box for each kind: clear **Thread fit** and **Touching faces** to see only the clashes that matter. **Hide this pair** beside a result hides that pair of parts whatever kind it is. Hidden results are counted ("2 results hidden by these filters"), and **Show the hidden pairs again** brings the pairs back. The status bar counts hidden results too.
+
+The filters are saved with the assembly, and each change is one {{key:Mod+Z}} step. **Sweep a joint for clashes** (below) uses them too. An assembly with filters is saved as version 4, which earlier PartCraft versions refuse to open instead of losing the filters.
 
 ## Watch the motion
 

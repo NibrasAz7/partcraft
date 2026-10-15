@@ -5,7 +5,7 @@
  * every run, up to CAPS.workspace bytes) and seeds the next worker with it — variables survive Stop.
  *
  *   const eng = createEngine({ makeWorker: () => host.computeWorker(MODULES, { name }), onPrint, onDisplay });
- *   await eng.run(source, { lang, file, budget, files, libBase, part }) → { ok, error?: { message, line, col, file }, stopped?, ms, vars }
+ *   await eng.run(source, { lang, file, budget, files, libBase, part, params }) → { ok, error?: { message, line, col, file }, stopped?, ms, vars }
  *   eng.stop()  ·  eng.busy  ·  await eng.list() → [{ name, type, size, bytes, min?, max? }]
  *   await eng.get(name) · set(name, value) · del(name) · clear() · info() · loadFile(name, fileName, bytes) · snapshot()
  *
@@ -48,10 +48,10 @@ export function createEngine({ makeWorker, onPrint = () => {}, onDisplay = () =>
     get lost() { return lost.slice(); },
     get stub() { return !!(info && info.stub); },
     /** Run source; print/display arrive through onPrint/onDisplay while it runs. */
-    async run(source, { lang = 'craft', file = '', budget, files, libBase, part } = {}) {
+    async run(source, { lang = 'craft', file = '', budget, files, libBase, part, params } = {}) {
       running++;
       try {
-        const r = await call('csRun', { source: String(source), lang, file, budget, files, libBase, ...(part !== undefined ? { part } : {}) }, {
+        const r = await call('csRun', { source: String(source), lang, file, budget, files, libBase, ...(part !== undefined ? { part } : {}), ...(params ? { params } : {}) }, {
           onProgress: (m) => {
             if (!m || typeof m !== 'object') return;
             if (typeof m.print === 'string') onPrint(m.print);

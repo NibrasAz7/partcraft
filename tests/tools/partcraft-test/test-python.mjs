@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /* SPDX-License-Identifier: Apache-2.0 */
 /**
- * test-python.mjs — Python as a CraftScript language (0.4 P10, cs-lang-python.js on the vendored Pyodide), in Node:
+ * test-python.mjs — Python as a CraftScript language (0.4 P10; since 0.5 cs-lang-python.js on CPython for WASI, run by wasi.js), in Node:
  * builtins and the analysis library through cs.*, numpy-like arithmetic (* elementwise, @ the matrix product) against
  * CraftScript's own answers, 0-based indexing (negative, slices, a logical mask) and assignment, structs ↔ dicts and cells ↔
  * lists, the workspace shared with CraftScript both ways, errors with the script's line (a Python error and a builtin's),
- * the instruction budget, the refused imports, and the console note on the first run.
+ * the instruction budget, and the seal: no JavaScript module, no host files, no network, each run a fresh interpreter.
  *   node tools/partcraft-test/test-python.mjs [--verbose]    (or runPythonTests() from bin/test-craftscript.mjs)
  */
 import fs from 'node:fs';
@@ -17,7 +17,7 @@ const REPO = path.resolve(HERE, '../..');
 const DEV = path.join(REPO, 'public_html/assets/apps/partcraft/dev/');
 
 export async function runPythonTests({ ok, section, skip = (m) => console.log('  skip ' + m) }) {
-  if (!fs.existsSync(path.join(REPO, 'public_html/assets/vendor/pyodide/current/pyodide.mjs'))) { skip('Pyodide is not vendored here (assets/vendor/pyodide)'); return; }
+  if (!fs.existsSync(path.join(REPO, 'public_html/assets/vendor/cpython-wasi/current/python.wasm'))) { skip('CPython for WASI is not vendored here (assets/vendor/cpython-wasi: node tools/partcraft-python/vendor.mjs)'); return; }
   const { makeRuntime } = await import(pathToFileURL(DEV + 'cs-all.js').href);
   const RT = await import(pathToFileURL(DEV + 'cs-runtime.js').href);
   const library = (n) => { const f = path.join(DEV, 'craftlib', n + '.craft'); return fs.existsSync(f) ? { source: fs.readFileSync(f, 'utf8'), file: n + '.craft' } : null; };
@@ -28,7 +28,7 @@ export async function runPythonTests({ ok, section, skip = (m) => console.log(' 
   const num = (name) => { const v = rt.ws.get(name); return typeof v === 'number' ? v : v && v.data ? Array.from(v.data) : v; };
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
-  section('Python (cs-lang-python.js, Pyodide)');
+  section('Python (cs-lang-python.js, CPython for WASI)');
   ok(RT.languageList().some((l) => l.id === 'python' && l.ext.includes('.py')) && RT.languageForFile('wing.py') === 'python', 'Python is a language for .py files');
   let r = await py('A = cs.magic(3)\nB = A @ A.T\nC = A * A\nD = A / 2 + 1\nE = 2 ** cs.tensor([1, 2, 3])\nF = -A\n');
   const rc = await craft('A2 = magic(3); B2 = A2 * A2\'; C2 = A2 .* A2; D2 = A2 / 2 + 1; E2 = 2 .^ [1 2 3]; F2 = -A2;');
@@ -50,7 +50,7 @@ export async function runPythonTests({ ok, section, skip = (m) => console.log(' 
   r = await py("m = cs.box_mesh(20, 10, 10, 5, 'hex')\nkind = m.type\nV, D = cs.call('eig', 2, cs.tensor([[2, 0], [0, 3]]))\nd1 = float(D[1, 1])\n");
   ok(r.ok && rt.ws.get('kind') === 'mesh' && num('d1') === 3, `the analysis library (cs.box_mesh) and cs.call('eig', 2, …) → V, D ${r.ok ? '' : r.error.message}`);
   // print → the console; the note on the first run
-  ok(/Python scripts are not sealed off/.test(out) === false, 'the note is printed once (on the first Python run, not every run)');
+  ok(!/not sealed off/.test(out), 'no "not sealed off" note: Python is sealed now');
   r = await py('print("hello", 1 + 1)\n');
   ok(r.ok && r.out === 'hello 2\n', `print goes to the console ("${r.out.trim()}")`);
   // errors: a Python one and a builtin's, with the script's line
@@ -64,11 +64,18 @@ export async function runPythonTests({ ok, section, skip = (m) => console.log(' 
   const small = makeRuntime({ budget: 2e5, onPrint: () => {}, onDisplay: () => {} });
   const rb = await small.run('i = 0\nwhile True:\n    i += 1\n', { lang: 'python', file: 'loop.py' });
   ok(!rb.ok && rb.error.stopped && /budget/i.test(rb.error.message), `the instruction budget stops an endless loop ("${rb.error.message}")`);
-  // refused imports
-  for (const mod of ['js', 'pyodide', 'gc']) {
+  // sealed: nothing outside its own file tree (0.5)
+  for (const mod of ['js', 'pyodide']) {
     r = await py(`import ${mod}\n`);
-    ok(!r.ok && /cannot import/.test(r.error.message), `import ${mod} is refused ("${r.error.message}")`);
+    ok(!r.ok && /ModuleNotFoundError/.test(r.error.message), `there is no ${mod} module to reach JavaScript ("${r.error.message}")`);
   }
+  r = await py("import os\nhere = sorted(os.listdir('/'))\ntry:\n    open('/etc/passwd')\n    got = 'yes'\nexcept OSError:\n    got = 'no'\n");
+  ok(r.ok && same(rt.ws.get('here').items, ['dev', 'lib', 'run', 'tmp']) && rt.ws.get('got') === 'no', 'its whole world is /dev, /lib, /run and /tmp in memory: the host\'s files are not there');
+  r = await py("import socket\ntry:\n    socket.create_connection(('example.com', 80), timeout=1)\n    net = 'yes'\nexcept Exception as e:\n    net = type(e).__name__\n");
+  ok(r.ok && rt.ws.get('net') !== 'yes', `no network: a socket cannot connect (${rt.ws.get('net')}: this build's socket module has no name lookup)`);
+  r = await py("import os\nwith open('/tmp/left.txt', 'w') as f: f.write('x')\n");
+  r = await py("import os\nleft = os.path.exists('/tmp/left.txt')\n");
+  ok(r.ok && rt.ws.get('left') === false, 'each run is a fresh interpreter: a file written by one run is gone in the next');
   r = await py('import math, json\nroot = math.sqrt(2)\ntxt = json.dumps([1, 2])\n');
   ok(r.ok && Math.abs(num('root') - Math.SQRT2) < 1e-15 && rt.ws.get('txt') === '[1, 2]', 'the standard library is there (math, json)');
 }

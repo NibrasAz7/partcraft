@@ -3,7 +3,7 @@ title: What is not built yet
 summary: Everything this PartCraft build does not do yet, from twisting sweeps to inch display, drawing dimensions and sub-assemblies, with what to do instead today.
 section: trouble
 order: 20
-keywords: missing, not yet, limits, limitations, roadmap, exact kernel, fillet, chamfer, shell, sweep, loft, step import, simulation, manufacture, twist sweep, loft end tangency, face fillet, equations, inches, drawing dimensions, sub-assemblies, cloud, desktop
+keywords: missing, not yet, limits, limitations, roadmap, exact kernel, fillet, chamfer, shell, sweep, loft, step import, simulation, manufacture, twist sweep, loft end tangency, face fillet, equations, inches, drawing dimensions, sub-assemblies, cloud, tablet, phone
 ---
 
 PartCraft is an early build. This page lists what it does not do yet, so you do not search for it, and what to do instead today. Nothing here has a date.
@@ -38,7 +38,7 @@ Some rows in the tables below suggest one of these features as the way round som
 | Twisting sweeps, thin-wall and surface sweeps; end tangency on the Loft feature; a loft with one guide rail; spline paths | {{ui:Sweep}} with a fixed orientation or an end scale; a loft with two or more guide rails: see [Sweep, loft and draft](topic:sweep-loft-draft) |
 | Ribs from arcs or splines; ribs grown square to the sketch (from a top view); draft on ribs; several ribs from one sketch | {{ui:Rib}} from one chain of lines in the rib's own plane: see [Ribs and gussets](topic:rib) |
 | "Up to" a curved surface, "up to next" stopping at a curved face | Up to a flat face or a reference plane |
-| Counterdrilled holes, inch and pipe threads, modelled (helical) threads | Counterbore with a small depth; tapped ISO metric holes carry a cosmetic thread and a callout |
+| Counterdrilled holes, inch and pipe threads, tapered threads, thread run-outs and chamfered thread starts | Counterbore with a small depth; ISO metric and trapezoidal threads, cosmetic or modelled: see [Threads on shafts and bores, drawn or modelled](topic:threads) |
 | Thin-feature extrudes | Draw both walls of the profile |
 | Pattern copies skipped one by one, fill patterns | Use separate features; patterns along a curve: {{ui:Path pattern}} |
 | Copying patterns, mirrors, fillets, chamfers, shells and imported solids | Copy the sketch or feature they are built on, or pattern it |
@@ -131,6 +131,7 @@ Some rows in the tables below suggest one of these features as the way round som
 | Turbulent flow with design accuracy (the Spalart–Allmaras model is in as experimental: pipe friction 30 to 34 % high, backward-step reattachment 21 to 39 % short; planned: finer cells near the walls), heat in flow, unsteady (time-accurate) flow, free surfaces, non-Newtonian fluids, rotating parts | Laminar, steady, isothermal flow of a Newtonian fluid, or the experimental turbulent model for qualitative patterns: see [Simulate fluid flow](topic:flow-simulation); the panel warns when the Reynolds number is past laminar |
 | Stress limits and manufacturing rules (overhangs, milling directions) in generative design; several materials in one shape | Stiffest shape for a volume; check the outcome in Simulation: see [Grow a shape from loads](topic:generative-design) |
 | An outcome as an editable (smooth, parametric) solid | STL, faceted STEP or a part with the outcome as an imported faceted solid |
+| Electric machine design: a rotor turning in a stator, torque against angle, saturating steel, permanent magnets, eddy currents and iron and copper losses; magnetic fields in 3-D or on curved meshes | Linear 2-D magnetostatics on a grid in the analysis library: coils, iron, gaps, inductance and pull: see [Magnetic fields in 2-D](topic:magnetic-fields-2d) |
 
 ## Scripts
 
@@ -138,6 +139,7 @@ Some rows in the tables below suggest one of these features as the way round som
 |---|---|
 | Hover help, breakpoints and stepping in the script editor | Find, fold and complete are in (see [Write and run scripts](topic:craftscript)); for the rest, your own editor: {{ui:Save}} and {{ui:Open}} in the Script group move scripts in and out; built-in functions are listed in [The CraftScript language](topic:craftscript-language) |
 | Breakpoints and stepping through a script | `disp` and `fprintf` along the way; {{key:Mod+Enter}} runs a few selected lines at a time |
+| Fields and plots a script shows drawn in the Design workspace; scripts changing the part's parameters | They show in the Script workspace; scripts read parameters with `param` (see [Write and run scripts](topic:craftscript)), change them on the {{ui:Parameters}} tab |
 | Pictures and tables side by side with plots; editing a plot (zoom, axis limits) before saving it | Side by side shows the plots; save a plot as PNG, SVG or CSV and finish it elsewhere |
 | numpy and other Python packages; Python offline; folding Python in the editor; Pascal Script | Python's standard library, CraftScript and Lua: see [Scripts in Python](topic:craftscript-python) |
 | Passing Lua functions to built-in functions; calling a library function from Lua by a name built while the script runs | Write the library function's name in the script (`cs.static_tet(…)`), or call it from a CraftScript script |
@@ -147,9 +149,8 @@ Some rows in the tables below suggest one of these features as the way round som
 | Not built yet | Instead, today |
 |---|---|
 | Cloud saving, sharing and version history | Not available yet. Save files to your computer and keep versions by name |
-| Desktop builds (Windows, macOS, Linux) | Not available yet. Use PartCraft in a current browser |
+| PartCraft as an installed app on iPad, Android and iPhone | Use PartCraft in the device's browser; on the desktop it runs in a browser or in CadCraft Studio |
 | Context (right-click) menus | Toolbar and right panel |
-| Customizing keys and the toolbar | Not available |
 | Working fully offline from a fresh start | Only when the app has been saved for offline use: see [Working offline](common:offline) |
 
 Report what you miss most through the site's support page: it shapes what comes next.

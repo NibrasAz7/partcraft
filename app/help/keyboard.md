@@ -50,6 +50,7 @@ In a number box, these keys copy and paste text as usual. Selected text in a pan
 | {{key:M}} | Measure, in every workspace and in an assembly; {{key:Esc}} clears the picks, {{key:Esc}} again closes it (see [Measure distances, angles and mass](topic:measure)) |
 | {{key:X}} | Section view on or off, in every workspace and in an assembly; {{key:Esc}} closes it (see [Look inside with a section view](topic:section-view)) |
 | {{key:Delete}} | Delete the selected feature (asks if others use it) |
+| {{key:0}} … {{key:9}}, {{key:.}} | With a feature selected: type its main number (an Extrude's depth, a Hole's diameter, a pattern's count, a fillet's radius …), then {{key:Enter}}. {{key:Esc}} keeps the old one |
 | {{key:Backspace}} | Delete the selected feature, when one is selected |
 | {{key:Esc}} | Stop choosing a sketch plane, or clear the selection (including edges or faces picked with {{key:Shift}}) |
 
